@@ -6,22 +6,22 @@ Incluye PWA (manifest + service worker), navegación entre roles (Usuario, Condu
 
 ---
 
-## 🚀 Estructura del proyecto
+## Estructura del proyecto
 ```
 payki/
 ├─ app/
 │  ├─ (shell)/
 │  │  ├─ layout.tsx
-│  │  ├─ page.tsx                # Home: selección rápida de rol
+│  │  ├─ session.tsx                # Home: selección rápida de rol
 │  │  ├─ user/
-│  │  │  ├─ page.tsx
+│  │  │  ├─ session.tsx
 │  │  │  ├─ recharge.tsx
 │  │  │  └─ pay.tsx
 │  │  ├─ driver/
-│  │  │  ├─ page.tsx
+│  │  │  ├─ session.tsx
 │  │  │  └─ session.tsx
 │  │  └─ admin/
-│  │     └─ page.tsx
+│  │     └─ session.tsx
 │  └─ api/
 │     └─ ping/route.ts           # Sanity check
 ├─ components/
