@@ -2,7 +2,7 @@
 import { useStore, useId } from '@/lib/store'
 import { Camera, CheckCircle } from 'lucide-react'
 
-export default function Pay() {
+export default function Page() {
     const { user, setBalance, addActivity } = useStore()
     const genId = useId('tx')
     const amount = 2.5

@@ -12,16 +12,16 @@ payki/
 ├─ app/
 │  ├─ (shell)/
 │  │  ├─ layout.tsx
-│  │  ├─ session.tsx                # Home: selección rápida de rol
+│  │  ├─ page.tsx                # Home: selección rápida de rol
 │  │  ├─ user/
-│  │  │  ├─ session.tsx
-│  │  │  ├─ recharge.tsx
-│  │  │  └─ pay.tsx
+│  │  │  ├─ page.tsx
+│  │  │  ├─ page.tsx
+│  │  │  └─ page.tsx
 │  │  ├─ driver/
-│  │  │  ├─ session.tsx
-│  │  │  └─ session.tsx
+│  │  │  ├─ page.tsx
+│  │  │  └─ page.tsx
 │  │  └─ admin/
-│  │     └─ session.tsx
+│  │     └─ page.tsx
 │  └─ api/
 │     └─ ping/route.ts           # Sanity check
 ├─ components/

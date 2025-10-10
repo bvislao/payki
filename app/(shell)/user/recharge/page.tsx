@@ -2,7 +2,7 @@
 import { FormEvent, useState } from 'react'
 import { useStore, useId } from '@/lib/store'
 
-export default function Recharge() {
+export default function Page() {
 
     const { user, setBalance, addActivity } = useStore()
     const genId = useId('tx')

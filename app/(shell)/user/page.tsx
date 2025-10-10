@@ -19,9 +19,9 @@ export default function Page() {
                             {user.balance.toFixed(2)}</p>
                     </div>
                     <div className="flex flex-col gap-3">
-                        <Link className="btn" href="/user/pay"><QrCode className="w-4
+                        <Link className="btn" href="/user/pay/"><QrCode className="w-4
 h-4"/> Pagar Pasaje (QR)</Link>
-                        <Link className="btn-outline" href="/user/recharge"><PlusCircle
+                        <Link className="btn-outline" href="/user/recharge/"><PlusCircle
                             className="w-4 h-4"/> Recargar Saldo</Link>
                     </div>
                 </div>

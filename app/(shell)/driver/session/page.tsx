@@ -2,7 +2,7 @@
 import { useStore, useId } from '@/lib/store'
 import QRModal from '@/components/QRModal'
 
-export default function Session() {
+export default function Page() {
     const { driverSession, startShift, endShift } = useStore()
     const genId = useId('drvtx')
     if (!driverSession) {

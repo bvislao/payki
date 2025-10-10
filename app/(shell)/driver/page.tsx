@@ -9,10 +9,10 @@ export default function Page() {
         <div className="max-w-xl mx-auto card p-6 space-y-4">
             <h2 className="text-xl font-semibold">Conductor</h2>
             {!driverSession ? (
-                <Link className="btn w-full" href="/driver/session">Iniciar Jornada</
+                <Link className="btn w-full" href="/driver/session/">Iniciar Jornada</
                     Link>
             ) : (
-                <Link className="btn w-full" href="/driver/session">Ir a Jornada</
+                <Link className="btn w-full" href="/driver/session/">Ir a Jornada</
                     Link>
             )}
         </div>
