@@ -37,12 +37,13 @@
     ]
   },
   "include": [
+    ".next/types/**/*.ts",
     "app",
     "components",
     "lib",
     "next-env.d.ts",
     "styles",
-    ".next/types/**/*.ts"
+    "build/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"

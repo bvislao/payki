@@ -24,7 +24,7 @@ export default function RootLayout({ children }: { children:
             <header className="sticky top-0 z-30 backdrop-blur border-b bordergray-200/60 dark:border-gray-800 bg-white/70 dark:bg-gray-950/70">
                 <nav className="container flex items-center justify-between
 h-14">
-                    <Link href="/" className="font-semibold tracking-tight">PAYKI</
+                    <Link href="/public" className="font-semibold tracking-tight">PAYKI</
                         Link>
                     <div className="flex items-center gap-2">
                        <Link className="btn-outline" href="/user"><UserRound
