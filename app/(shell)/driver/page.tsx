@@ -1,20 +1,16 @@
 'use client'
 import Link from 'next/link'
-import { useStore } from '@/lib/store'
+import RequireRole from '@/components/RequireRole'
+import { useAuth } from '@/lib/auth'
 
-export default function Page() {
-    const { driverSession } = useStore()
-
+export default function DriverHome() {
+    const { profile } = useAuth()
     return (
-        <div className="max-w-xl mx-auto card p-6 space-y-4">
-            <h2 className="text-xl font-semibold">Conductor</h2>
-            {!driverSession ? (
-                <Link className="btn w-full" href="/driver/session/">Iniciar Jornada</
-                    Link>
-            ) : (
-                <Link className="btn w-full" href="/driver/session/">Ir a Jornada</
-                    Link>
-            )}
-        </div>
+        <RequireRole role="driver">
+            <div className="max-w-xl mx-auto card p-6 space-y-4">
+                <h2 className="text-xl font-semibold">Conductor — {profile?.full_name}</h2>
+                <Link className="btn w-full" href="/driver/session">Ir a Jornada</Link>
+            </div>
+        </RequireRole>
     )
 }

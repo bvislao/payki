@@ -1,220 +1,189 @@
 'use client'
-import { useState, useMemo } from 'react'
-import { useRouter } from 'next/navigation'
-import { useStore, useId } from '@/lib/store'
+import { useEffect, useState } from 'react'
+import RequireRole from '@/components/RequireRole'
+import { useAuth } from '@/lib/auth'
+import { supabase } from '@/lib/supabaseClient'
+import { callFunction } from '@/lib/functions'
 import QRModal from '@/components/QRModal'
-import { Clock, Bus, MapPin, Users, TrendingUp } from 'lucide-react'
 
-export default function Page() {
-    const router = useRouter()
-    const { driverSession, startShift, endShift, drivers } = useStore()
-    const genId = useId('drvtx')
-    const [qrData, setQrData] = useState<{ label: string; amount: number; payload: string } | null>(null)
+type Shift = {
+    id: string
+    vehicle_id: string
+    operator_id: string
+    driver_id: string
+    started_at: string
+    status: 'open' | 'closed'
+}
+type Fare = { id: string; code: string; label: string; base_amount: number }
+type Benefit = 'none' | 'student' | 'police' | 'firefighter'
+type TxRow = { id: string; label: string; amount: number }
 
-    // Calcular estadísticas en tiempo real
-    const stats = useMemo(() => {
-        if (!driverSession) return null
-        const total = driverSession.transactions.reduce((sum, t) => sum + t.amount, 0)
-        const count = driverSession.transactions.length
-        const avgFare = count > 0 ? total / count : 0
-        return { total, count, avgFare }
-    }, [driverSession])
+export default function DriverSession() {
+    const { userId, profile } = useAuth()
+    const [shift, setShift] = useState<Shift | null>(null)
+    const [fares, setFares] = useState<Fare[]>([])
+    const [txs, setTxs] = useState<TxRow[]>([])
+    const [busy, setBusy] = useState(false)
 
-    if (!driverSession) {
-        const availableDrivers = drivers.filter(d => !d.onShift)
-
-        return (
-            <div className="max-w-2xl mx-auto space-y-6">
-                <div className="card p-8 space-y-6">
-                    <div className="text-center space-y-2">
-                        <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto">
-                            <Bus className="w-8 h-8 text-blue-600" />
-                        </div>
-                        <h2 className="text-2xl font-bold">Iniciar Jornada</h2>
-                        <p className="text-gray-500">Selecciona un conductor para comenzar</p>
-                    </div>
-
-                    <div className="space-y-3">
-                        {availableDrivers.map(driver => (
-                            <button
-                                key={driver.id}
-                                className="w-full p-4 border-2 border-gray-200 rounded-lg hover:border-blue-500 hover:bg-blue-50 transition-all text-left"
-                                onClick={() => startShift(driver.id)}
-                            >
-                                <div className="flex items-center justify-between">
-                                    <div>
-                                        <div className="font-semibold">{driver.name}</div>
-                                        <div className="text-sm text-gray-500">ID: {driver.id}</div>
-                                    </div>
-                                    <div className="text-blue-600 font-medium">Iniciar →</div>
-                                </div>
-                            </button>
-                        ))}
-                    </div>
-                </div>
-            </div>
-        )
+    // Helper: exige token sin usar non-null assertion
+    async function requireToken(): Promise<string> {
+        const { data } = await supabase.auth.getSession()
+        const token = data.session?.access_token
+        if (!token) throw new Error('No hay sesión activa')
+        return token
     }
 
-    const { driverId, unitId, route, fares, transactions, startedAt } = driverSession
-    const driver = drivers.find(d => d.id === driverId)
-    const duration = Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000 / 60)
+    useEffect(() => {
+        if (!userId) return
+            ;(async () => {
+            const { data } = await supabase
+                .from('driver_shifts')
+                .select('*')
+                .eq('driver_id', userId)
+                .eq('status', 'open')
+                .maybeSingle()
+            if (data) setShift(data as Shift)
+        })()
+    }, [userId])
 
-    const handleShowQR = (label: string, amount: number) => {
-        const payload = JSON.stringify({
-            id: genId(),
-            amount,
-            unitId,
-            driverId,
-            ts: Date.now(),
-            label
-        })
-        setQrData({ label, amount, payload })
-    }
+    useEffect(() => {
+        if (!shift) return
+            ;(async () => {
+            const { data } = await supabase
+                .from('fares')
+                .select('id,code,label,base_amount')
+                .eq('operator_id', shift.operator_id)
+            setFares((data as Fare[] | null) ?? [])
+        })()
+    }, [shift])
 
-    const finish = () => {
-        const res = endShift()
-        const confirmed = confirm(
-            `¿Finalizar jornada?\n\n` +
-            `Pasajeros atendidos: ${res.count}\n` +
-            `Total recaudado: S/ ${res.total.toFixed(2)}\n` +
-            `Duración: ${duration} minutos`
-        )
-        if (confirmed) {
-            router.back()
+    const start = async () => {
+        if (!userId) return
+        setBusy(true)
+        try {
+            const token = await requireToken()
+            const res = await callFunction<{ ok: true; shift: Shift }>(
+                'start_shift',
+                { driver_id: userId },
+                token
+            )
+            setShift(res.shift)
+        } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err)
+            const friendly =
+                msg === 'FORBIDDEN'
+                    ? 'No eres admin'
+                    : msg === 'NO_VEHICLE_ASSIGNED'
+                        ? 'No tienes vehículo asignado'
+                        : msg
+            alert(friendly)
+        } finally {
+            setBusy(false)
         }
     }
 
+    const registerFare = async (f: Fare) => {
+        if (!userId || !shift) return
+        setBusy(true)
+        try {
+            // para demo: toma el primer pasajero que encuentre
+            const { data: p } = await supabase
+                .from('profiles')
+                .select('id,benefit')
+                .eq('role', 'passenger')
+                .limit(1)
+
+            const passenger = p?.[0] as { id: string; benefit?: Benefit } | undefined
+            const benefit: Benefit = passenger?.benefit ?? 'none'
+            const token = await requireToken()
+
+            const res = await callFunction<{ ok: true; tx: { id: string; amount: number } }>(
+                'ride_pay',
+                {
+                    passenger_id: passenger?.id,
+                    driver_id: userId,
+                    vehicle_id: shift.vehicle_id,
+                    operator_id: shift.operator_id,
+                    fare_code: f.code,
+                    benefit,
+                },
+                token
+            )
+
+            setTxs((prev) => [
+                { id: res.tx.id, label: `Cobro ${f.label}`, amount: res.tx.amount },
+                ...prev,
+            ])
+        } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err)
+            alert(msg)
+        } finally {
+            setBusy(false)
+        }
+    }
+
+    const finish = async () => {
+        if (!shift) return
+        const { count, sum } = txs.reduce(
+            (a, t) => ({ count: a.count + 1, sum: a.sum + t.amount }),
+            { count: 0, sum: 0 }
+        )
+        alert(`Jornada finalizada. Pasajeros: ${count} | Ingresos: S/ ${sum.toFixed(2)}`)
+        await supabase
+            .from('driver_shifts')
+            .update({ status: 'closed', ended_at: new Date().toISOString() })
+            .eq('id', shift.id)
+        setShift(null)
+        setTxs([])
+    }
+
     return (
-        <div className="space-y-6">
-            {/* Header con información del conductor */}
-            <div className="card p-6">
-                <div className="flex items-start justify-between">
-                    <div className="space-y-3">
-                        <div className="flex items-center gap-3">
-                            <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
-                                <Bus className="w-6 h-6 text-green-600" />
-                            </div>
-                            <div>
-                                <h2 className="text-xl font-bold">{driver?.name || driverId}</h2>
-                                <p className="text-sm text-gray-500">Jornada Activa</p>
-                            </div>
-                        </div>
-                        <div className="flex flex-wrap gap-4 text-sm">
-                            <div className="flex items-center gap-2">
-                                <Bus className="w-4 h-4 text-gray-400" />
-                                <span>Unidad {unitId}</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <MapPin className="w-4 h-4 text-gray-400" />
-                                <span>{route}</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <Clock className="w-4 h-4 text-gray-400" />
-                                <span>{duration} min</span>
-                            </div>
-                        </div>
-                    </div>
-                    <button
-                        className="btn btn-sm bg-red-500 hover:bg-red-600 text-white"
-                        onClick={finish}
-                    >
-                        Finalizar
+        <RequireRole role="driver">
+            {!shift ? (
+                <div className="max-w-xl mx-auto card p-6 space-y-4">
+                    <h2 className="text-xl font-semibold">Iniciar Jornada</h2>
+                    <button className="btn w-full" disabled={busy} onClick={start}>
+                        {busy ? 'Validando…' : 'Iniciar Jornada'}
                     </button>
                 </div>
-            </div>
-
-            {/* Estadísticas */}
-            {stats && (
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="card p-4">
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <p className="text-sm text-gray-500">Pasajeros</p>
-                                <p className="text-2xl font-bold">{stats.count}</p>
-                            </div>
-                            <Users className="w-8 h-8 text-blue-500" />
-                        </div>
-                    </div>
-                    <div className="card p-4">
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <p className="text-sm text-gray-500">Total Recaudado</p>
-                                <p className="text-2xl font-bold text-green-600">S/ {stats.total.toFixed(2)}</p>
-                            </div>
-                            <TrendingUp className="w-8 h-8 text-green-500" />
-                        </div>
-                    </div>
-                    <div className="card p-4">
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <p className="text-sm text-gray-500">Tarifa Promedio</p>
-                                <p className="text-2xl font-bold">S/ {stats.avgFare.toFixed(2)}</p>
-                            </div>
-                            <TrendingUp className="w-8 h-8 text-purple-500" />
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            <div className="grid lg:grid-cols-2 gap-6">
-                {/* Tarifas y QR */}
-                <div className="card p-6 space-y-4">
-                    <h3 className="text-lg font-semibold">Generar QR de Pago</h3>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                        {fares.map(f => (
-                            <button
-                                key={f.label}
-                                className="p-4 border-2 border-gray-200 rounded-lg hover:border-blue-500 hover:bg-blue-50 transition-all text-center space-y-1"
-                                onClick={() => handleShowQR(f.label, f.amount)}
-                            >
-                                <div className="text-xs text-gray-500 uppercase">{f.label}</div>
-                                <div className="text-2xl font-bold text-blue-600">S/ {f.amount.toFixed(2)}</div>
-                            </button>
-                        ))}
-                    </div>
-                </div>
-
-                {/* Transacciones */}
-                <div className="card p-6">
-                    <h3 className="font-semibold mb-4">Historial de Transacciones</h3>
-                    <div className="max-h-80 overflow-y-auto space-y-2">
-                        {transactions.length === 0 ? (
-                            <div className="text-center py-8">
-                                <Users className="w-12 h-12 text-gray-300 mx-auto mb-2" />
-                                <p className="text-sm text-gray-400">No hay transacciones aún</p>
-                                <p className="text-xs text-gray-400 mt-1">Los pagos aparecerán aquí</p>
-                            </div>
-                        ) : (
-                            transactions.map((t, idx) => (
-                                <div
-                                    key={t.id}
-                                    className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
-                                >
-                                    <div className="flex items-center gap-3">
-                                        <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center text-xs font-bold text-green-600">
-                                            {transactions.length - idx}
-                                        </div>
-                                        <div>
-                                            <div className="font-medium text-sm">{t.label}</div>
-                                            <div className="text-xs text-gray-500">{t.date}</div>
-                                        </div>
+            ) : (
+                <div className="grid lg:grid-cols-2 gap-6">
+                    <div className="card p-6 space-y-2">
+                        <h2 className="text-xl font-semibold">Jornada Activa</h2>
+                        <p className="text-sm text-gray-500">
+                            Conductor {profile?.full_name} — Vehículo {shift.vehicle_id}
+                        </p>
+                        <div className="mt-4 grid grid-cols-2 md:grid-cols-3 gap-3">
+                            {fares.map((f) => (
+                                <div key={f.id} className="space-y-2">
+                                    <div className="text-sm font-medium">
+                                        {f.label} S/ {Number(f.base_amount).toFixed(2)}
                                     </div>
-                                    <span className="text-green-600 font-semibold">
-                                        +S/ {t.amount.toFixed(2)}
-                                    </span>
+                                    <QRModal value={JSON.stringify({ shift: shift.id, fare: f.code })} />
+                                    <button className="btn w-full" disabled={busy} onClick={() => registerFare(f)}>
+                                        Registrar Cobro
+                                    </button>
                                 </div>
-                            ))
-                        )}
+                            ))}
+                        </div>
+                        <button className="btn w-full mt-4" onClick={finish}>
+                            Terminar Jornada
+                        </button>
+                    </div>
+
+                    <div className="card p-6">
+                        <h3 className="font-semibold mb-3">Transacciones del día</h3>
+                        <ul className="space-y-2 text-sm">
+                            {txs.map((t) => (
+                                <li key={t.id} className="flex items-center justify-between">
+                                    <span>{t.label}</span>
+                                    <span className="text-green-600">+S/ {t.amount.toFixed(2)}</span>
+                                </li>
+                            ))}
+                        </ul>
                     </div>
                 </div>
-            </div>
-
-            {qrData && (
-                <QRModal
-                    value={qrData.payload}
-                />
             )}
-        </div>
+        </RequireRole>
     )
 }

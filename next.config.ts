@@ -1,10 +1,19 @@
-import type { NextConfig } from "next";
+import type { NextConfig } from 'next'
+
+const isProd = process.env.NODE_ENV === 'production'
 
 const nextConfig: NextConfig = {
-    // Genera .next/standalone + .next/static
-    output: 'export',              // genera archivos estáticos
-    distDir: 'build',              // cambia la carpeta de salida a /build
-    images: { unoptimized: true }, // evita errores con next/image en modo export
-};
-
+    // Solo en producción queremos estático y carpeta build
+    ...(isProd ? { output: 'export', images: { unoptimized: true } } : {}),
+    distDir: isProd ? 'build' : '.next',
+    reactStrictMode: false,
+    //experimental: { ppr: true },
+    webpack: (config, { dev }) => {
+        if (dev) {
+            // por si queda cache: ignora cualquier carpeta build accidental
+            config.watchOptions = { ...config.watchOptions, ignored: ['**/build/**'] }
+        }
+        return config
+    },
+}
 export default nextConfig;

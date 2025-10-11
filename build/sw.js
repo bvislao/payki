@@ -18,3 +18,22 @@ self.addEventListener('fetch', (e) => {
         }).catch(() => caches.match('/')))
     );
 });
+
+self.addEventListener('push', (event) => {
+    let data = {};
+    try { data = event.data ? event.data.json() : {}; } catch {}
+    const title = data.title || 'PAYKI';
+    const options = {
+        body: data.body || 'Notificación',
+        icon: '/icons/icon-192.png',
+        badge: '/icons/icon-192.png',
+        data: data.url || '/'
+    };
+    event.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener('notificationclick', (e) => {
+    e.notification.close();
+    const url = e.notification.data || '/';
+    e.waitUntil(clients.openWindow(url));
+});
