@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabaseClient'
 import { useAuth } from '@/lib/auth'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import toast from "react-hot-toast";
 
 export default function Page() {
     const [email, setEmail] = useState('demo@payki.pe')
@@ -20,6 +21,7 @@ export default function Page() {
             if (mode === 'login') {
                 const { error } = await supabase.auth.signInWithPassword({ email, password })
                 if (error) throw error
+                toast.success("Sesión iniciada!")
                 router.push('/')
             } else {
                 const { data, error } = await supabase.auth.signUp({ email, password })
@@ -37,12 +39,12 @@ export default function Page() {
                         benefit: 'none',
                     })
                 }
-                alert('Cuenta creada. Ahora puedes iniciar sesión.')
+                toast.success('Revisa tu email para el link de activación.')
                 setMode('login')
             }
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err)
-            alert(msg)
+            toast.error(msg)
         } finally {
             setLoading(false)
         }

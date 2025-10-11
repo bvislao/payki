@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabaseClient'
+import toast from "react-hot-toast";
 
 type Fleet = { id: string; name: string; operator_id: string }
 type Vehicle = { id: string; code: string; plate: string; active: boolean; fleet_id: string | null }
@@ -53,10 +54,10 @@ export function AdminVehiclesByFleet() {
             setCode('')
             setPlate('')
             await loadVehicles(fleetId)
-            alert('Vehículo agregado')
+            toast.success('Vehículo agregado')
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err)
-            alert(msg)
+            toast.error(msg)
         } finally {
             setBusy(false)
         }

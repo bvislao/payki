@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 import { callFunction } from '@/lib/functions'
+import toast from "react-hot-toast";
 
 type Operator = { id: string; name: string }
 type Fleet = { id: string; name: string; operator_id: string }
@@ -80,7 +81,7 @@ export function AdminFleetManager() {
                 },
                 token
             )
-            alert(`Flota guardada: ${res.fleet_id}`)
+            toast.success(`Flota guardada: ${res.fleet_id}`)
             setFleetName('')
             setOperatorId('')
             setSelectedVehicles([])
@@ -95,7 +96,7 @@ export function AdminFleetManager() {
             setVehicles((vs as Vehicle[] | null) ?? [])
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err)
-            alert(msg)
+            toast.error(msg)
         } finally {
             setBusy(false)
         }
@@ -104,17 +105,17 @@ export function AdminFleetManager() {
     const assignDriver = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault()
         if (!driverId || !vehicleId) {
-            alert('Selecciona chofer y vehículo')
+            toast('Selecciona chofer y vehículo', { })
             return
         }
         setBusy(true)
         try {
             const token = await requireToken()
             await callFunction('admin_assign_driver', { driver_id: driverId, vehicle_id: vehicleId }, token)
-            alert('Asignación creada')
+            toast.success('Asignación creada')
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err)
-            alert(msg)
+            toast.error(msg)
         } finally {
             setBusy(false)
         }

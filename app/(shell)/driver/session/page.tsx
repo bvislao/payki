@@ -5,6 +5,7 @@ import { useAuth } from '@/lib/auth'
 import { supabase } from '@/lib/supabaseClient'
 import { callFunction } from '@/lib/functions'
 import QRModal from '@/components/QRModal'
+import toast from "react-hot-toast";
 
 type Shift = {
     id: string
@@ -76,7 +77,7 @@ export default function DriverSession() {
                     : msg === 'NO_VEHICLE_ASSIGNED'
                         ? 'No tienes vehículo asignado'
                         : msg
-            alert(friendly)
+            toast.success(friendly)
         } finally {
             setBusy(false)
         }
@@ -116,7 +117,7 @@ export default function DriverSession() {
             ])
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err)
-            alert(msg)
+            toast.error(msg)
         } finally {
             setBusy(false)
         }
@@ -128,7 +129,7 @@ export default function DriverSession() {
             (a, t) => ({ count: a.count + 1, sum: a.sum + t.amount }),
             { count: 0, sum: 0 }
         )
-        alert(`Jornada finalizada. Pasajeros: ${count} | Ingresos: S/ ${sum.toFixed(2)}`)
+        toast.success(`Jornada finalizada. Pasajeros: ${count} | Ingresos: S/ ${sum.toFixed(2)}`)
         await supabase
             .from('driver_shifts')
             .update({ status: 'closed', ended_at: new Date().toISOString() })

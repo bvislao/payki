@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabaseClient'
 import { registerSW, subscribePush } from '@/lib/push'
 import { useAuth } from '@/lib/auth'
 import {detectPushSupport} from "@/lib/pushSupport";
+import toast from "react-hot-toast";
 
 export default function PushClient() {
     const { userId } = useAuth()
@@ -13,12 +14,12 @@ export default function PushClient() {
     const enable = async () => {
         const support = detectPushSupport()
         if (!support.ok) {
-            alert('Navegador no soportado para Web Push:\n- ' + support.reasons.join('\n- '))
+            toast('Navegador no soportado para Web Push:\n- ' + support.reasons.join('\n- '))
             return
         }
 
-        if (!userId) return alert('Inicia sesión primero')
-        if (!vapid) return alert('Falta NEXT_PUBLIC_VAPID_PUBLIC_KEY')
+        if (!userId) return toast('Inicia sesión primero')
+        if (!vapid) return toast('Falta NEXT_PUBLIC_VAPID_PUBLIC_KEY')
 
         try {
             setBusy(true)
@@ -30,9 +31,9 @@ export default function PushClient() {
                     user_agent: navigator.userAgent,
                 }, { onConflict: 'endpoint' })
             })
-            alert('Notificaciones activadas')
+            toast('Notificaciones activadas')
         } catch (e: unknown) {
-            alert(e instanceof Error ? e.message : String(e))
+            toast.error(e instanceof Error ? e.message : String(e))
         } finally {
             setBusy(false)
         }

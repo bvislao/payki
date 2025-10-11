@@ -3,6 +3,7 @@ import { useState } from 'react'
 import RequireRole from '@/components/RequireRole'
 import { useAuth } from '@/lib/auth'
 import { supabase } from '@/lib/supabaseClient'
+import toast from "react-hot-toast";
 
 export default function UserPayPage() {
     const { userId, profile } = useAuth()
@@ -42,10 +43,10 @@ export default function UserPayPage() {
             })
             const json = await res.json()
             if (!res.ok) throw new Error(json?.error || 'Error al pagar')
-            alert(`Pago de S/ ${json.tx.amount.toFixed(2)} realizado con éxito`)
+            toast.success(`Pago de S/ ${json.tx.amount.toFixed(2)} realizado con éxito`)
             setQr('')
         } catch (e:any) {
-            alert(e.message)
+            toast.error(e.message)
         } finally { setBusy(false) }
     }
 

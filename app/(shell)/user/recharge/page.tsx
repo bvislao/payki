@@ -3,6 +3,7 @@ import { useState } from 'react'
 import RequireRole from '@/components/RequireRole'
 import { supabase } from '@/lib/supabaseClient'
 import { useAuth } from '@/lib/auth'
+import toast from "react-hot-toast";
 
 export default function RechargePage() {
     const { userId } = useAuth()
@@ -23,9 +24,9 @@ export default function RechargePage() {
                 amount: Number(amount),
                 meta: { method:'card', card_last4: card.slice(-4), exp }
             })
-            alert('Recarga exitosa')
+            toast.success('Recarga exitosa')
         } catch (e:any) {
-            alert(e.message)
+            toast.error(e.message)
         } finally { setBusy(false) }
     }
 

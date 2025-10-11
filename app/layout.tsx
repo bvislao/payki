@@ -2,6 +2,7 @@ import '@/styles/globals.css'
 import type { Metadata } from 'next'
 import { AuthProvider } from '@/lib/auth'
 import HeaderClient from '@/components/HeaderClient'
+import ToasterClient from "@/components/ToasterClient";
 
 export const metadata: Metadata = {
     title: 'PAYKI',
@@ -20,6 +21,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <footer className="container py-8 text-xs text-center text-gray-500">
                 © {new Date().getFullYear()} PAYKI
             </footer>
+            <ToasterClient />
         </AuthProvider>
         </body>
         </html>

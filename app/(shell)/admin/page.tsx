@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabaseClient'
 import {broadcastPush, callFunction} from '@/lib/functions'
 import { AdminFleetManager } from '@/components/AdminFleetManager'
 import { AdminVehiclesByFleet } from '@/components/AdminFleetVehicleManager'
+import toast from "react-hot-toast";
 
 type FareRow = { code: string; label: string; base_amount: number }
 type Vehicle = { id: string; code: string; plate: string; active: boolean }
@@ -123,13 +124,13 @@ export default function AdminPage() {
                 },
                 token
             )
-            alert('Usuario creado correctamente')
+            toast.success('Usuario creado correctamente')
             setUEmail('')
             setUPass('')
             setUName('')
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err)
-            alert(msg)
+            toast.error(msg)
         } finally {
             setBusy(false)
         }
@@ -145,12 +146,12 @@ export default function AdminPage() {
                 { name: opName, fares },
                 token
             )
-            alert('Operador y tarifas guardados')
+            toast.success('Operador y tarifas guardados')
             setOpName('')
             setFares([{ code: 'general', label: 'General', base_amount: 2.5 }])
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err)
-            alert(msg)
+            toast.error(msg)
         } finally {
             setBusy(false)
         }
@@ -184,7 +185,7 @@ export default function AdminPage() {
                     const title = (e.currentTarget.elements.namedItem('title') as HTMLInputElement).value
                     const body  = (e.currentTarget.elements.namedItem('body') as HTMLInputElement).value
                     await broadcastPush(title, body, '/')
-                    alert('Enviado a todos los suscritos')
+                    toast.success('Enviado a todos los suscritos')
                 }}
                 className="card p-4 space-y-3"
             >
