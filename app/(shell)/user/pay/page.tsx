@@ -3,64 +3,66 @@ import { useState } from 'react'
 import RequireRole from '@/components/RequireRole'
 import { useAuth } from '@/lib/auth'
 import { supabase } from '@/lib/supabaseClient'
-import toast from "react-hot-toast";
+import { callFunction } from '@/lib/functions'
+import toast from 'react-hot-toast'
 
-export default function UserPayPage() {
-    const { userId, profile } = useAuth()
-    const [qr, setQr] = useState('') // aquí pegarías el payload del QR del bus
+export default function PayQRPage() {
+    const { userId } = useAuth()
+    const [raw, setRaw] = useState('{"shift":"<uuid>","fare":"troncal"}')
     const [busy, setBusy] = useState(false)
 
-    const simulateQuote = async () => {
-        // si quisieras pre-visualizar el monto: llama fare_quote con operator_id+fare_code
-    }
+    const simulate = async () => {
+        if (!userId) return toast.error('Inicia sesión')
+        let obj: { shift?: string; fare?: string }
+        try {
+            obj = JSON.parse(raw)
+            if (!obj.shift || !obj.fare) throw new Error('Formato inválido')
+        } catch {
+            return toast.error('Pegue un JSON válido del QR')
+        }
 
-    const pay = async () => {
-        if (!userId || !qr) return
         setBusy(true)
         try {
-            // payload esperado del QR generado por el conductor: { shift, fare }
-            const parsed = JSON.parse(qr) as { shift:string; fare:string }
-            // necesitamos datos del shift para saber vehicle/operator/driver
-            const { data: s } = await supabase
-                .from('driver_shifts')
-                .select('id,vehicle_id,operator_id,driver_id,status')
-                .eq('id', parsed.shift).eq('status','open').single()
+            const token = (await supabase.auth.getSession()).data.session?.access_token
+            if (!token) throw new Error('Sin sesión')
 
-            if (!s) throw new Error('Jornada no válida')
+            const res = await callFunction<{ ok: true; tx: { id: string; amount: number } }>(
+                'ride_pay',
+                { shift: obj.shift, fare: obj.fare, passenger_id: userId },
+                token
+            )
 
-            const benefit = (profile?.benefit ?? 'none') as 'none'|'student'|'police'|'firefighter'
-            const res = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/ride_pay`, {
-                method:'POST',
-                headers:{'Content-Type':'application/json'},
-                body: JSON.stringify({
-                    passenger_id: userId,
-                    driver_id: s.driver_id,
-                    vehicle_id: s.vehicle_id,
-                    operator_id: s.operator_id,
-                    fare_code: parsed.fare,
-                    benefit
-                })
-            })
-            const json = await res.json()
-            if (!res.ok) throw new Error(json?.error || 'Error al pagar')
-            toast.success(`Pago de S/ ${json.tx.amount.toFixed(2)} realizado con éxito`)
-            setQr('')
-        } catch (e:any) {
-            toast.error(e.message)
-        } finally { setBusy(false) }
+            toast.success(`Pago realizado: S/ ${Number(res.tx.amount).toFixed(2)}`)
+            setRaw('') // limpiar
+        } catch (e: any) {
+            const msg = e?.message || ''
+            if (msg.includes('NO_VEHICLE_ASSIGNED')) toast.error('Jornada sin vehículo')
+            else if (msg.includes('SHIFT_CLOSED')) toast.error('Jornada finalizada')
+            else if (msg.includes('FARE_NOT_FOUND')) toast.error('Tarifa no válida')
+            else toast.error(msg || 'Error al pagar')
+        } finally {
+            setBusy(false)
+        }
     }
 
     return (
         <RequireRole role="passenger">
-            <div className="max-w-lg mx-auto card p-6 space-y-4">
-                <h2 className="text-xl font-semibold">Pagar Pasaje (QR)</h2>
-                <div className="border rounded-2xl p-4 bg-gray-50 dark:bg-gray-900/40">
-                    <div className="text-sm mb-2">Simula la cámara pegando el contenido del QR:</div>
-                    <textarea className="w-full rounded-xl border p-3 h-28" value={qr} onChange={e=>setQr(e.target.value)}
-                              placeholder='{"shift":"<uuid>","fare":"troncal"}' />
-                    <div className="flex gap-2">
-                        <button className="btn" disabled={busy || !qr} onClick={pay}>Simular Escaneo Exitoso</button>
-                        <button className="btn-outline" onClick={()=>setQr('')}>Limpiar</button>
+            <div className="max-w-2xl mx-auto card p-6 space-y-4">
+                <h2 className="text-2xl font-semibold">Pagar Pasaje (QR)</h2>
+
+                <div className="rounded-2xl border p-4">
+                    <div className="text-sm text-gray-400 mb-2">Simula la cámara pegando el contenido del QR:</div>
+                    <textarea
+                        className="w-full rounded-xl border px-3 py-2 min-h-[140px] bg-white dark:bg-gray-900"
+                        placeholder='{"shift":"<uuid>","fare":"troncal"}'
+                        value={raw}
+                        onChange={(e) => setRaw(e.target.value)}
+                    />
+                    <div className="flex gap-3 mt-4">
+                        <button className="btn" disabled={busy} onClick={simulate}>
+                            {busy ? 'Procesando…' : 'Simular Escaneo Exitoso'}
+                        </button>
+                        <button className="btn-outline" onClick={() => setRaw('')}>Limpiar</button>
                     </div>
                 </div>
             </div>
