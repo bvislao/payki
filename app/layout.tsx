@@ -3,6 +3,7 @@ import type { Metadata } from 'next'
 import { AuthProvider } from '@/lib/auth'
 import HeaderClient from '@/components/HeaderClient'
 import ToasterClient from "@/components/ToasterClient";
+import SWRegister from "@/components/SWRegister";
 
 export const metadata: Metadata = {
     title: 'PAYKI',
@@ -12,6 +13,9 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
     return (
         <html lang="es" suppressHydrationWarning>
+        <head>
+            <link rel="manifest" href="/manifest.json" />
+        </head>
         <body suppressHydrationWarning>
         <AuthProvider>
             <header className="sticky top-0 z-30 backdrop-blur border-b border-gray-200/60 dark:border-gray-800 bg-white/70 dark:bg-gray-950/70">
@@ -23,6 +27,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </footer>
             <ToasterClient />
         </AuthProvider>
+        <SWRegister />
         </body>
         </html>
     )
