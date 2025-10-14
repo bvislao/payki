@@ -16,30 +16,21 @@ export default function RechargePage() {
     const submit = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault()
         if (!userId) return
-        if (!amount || amount <= 0) return toast.error('Monto inválido')
         setBusy(true)
         try {
-            const { error } = await supabase
-                .from('transactions')
-                .insert({
-                    type: 'topup',
-                    passenger_id: userId,
-                    amount: Number(amount),
-                    meta: { method: 'card', card_last4: card.slice(-4), exp }
-                })
-
+            const idempotencyKey = crypto.randomUUID()
+            const { data, error } = await supabase.rpc('topup_balance', {
+                p_passenger_id: userId,
+                p_amount: Number(amount),
+                p_idempotency_key: idempotencyKey
+            })
             if (error) throw error
-
-            toast.success('Recarga exitosa')
-            // opcional: limpiar campos
-            // setAmount(10); setCard('4111 1111 1111 1111'); setExp('12/28'); setCvv('123');
-            // opcional: refrescar balance/actividad si tu UI lo calcula
-        } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err)
-            toast.error(msg)
-        } finally {
-            setBusy(false)
-        }
+            toast.success(`Recarga exitosa. Nuevo saldo: S/ ${Number(data?.[0]?.new_balance ?? 0).toFixed(2)}`)
+            // return user to previous page
+            history.back()
+        } catch (e:any) {
+            toast.error(e.message)
+        } finally { setBusy(false) }
     }
 
     return (

@@ -14,7 +14,7 @@ const QrReader = dynamic(
 type QRPayload = { shift?: string; fare?: string }
 
 export default function PayQRPage() {
-    const { userId } = useAuth()
+    const {userId} = useAuth()
     const [busy, setBusy] = useState(false)
     const [manual, setManual] = useState('')              // fallback manual
     const [hasCam, setHasCam] = useState<boolean | null>(null)
@@ -56,8 +56,13 @@ export default function PayQRPage() {
                 idempotencyKey: idem
             }, token)
 
-            // @ts-ignore
-            toast.success(`Pago realizado: S/ ${Number(res.tx.amount).toFixed(2)}`)
+            if (!res?.ok || res.tx?.amount == null) {
+                throw new Error('Transacción inválida');
+            }
+            const amt = Number(res.tx.amount);
+            if (Number.isNaN(amt)) throw new Error('Monto inválido');
+
+            toast.success(`Pago realizado: S/ ${amt.toFixed(2)}`);
             setManual('')
 
         } catch (e: any) {
@@ -89,13 +94,14 @@ export default function PayQRPage() {
                 {/* Bloque de escaneo por cámara */}
                 <div className="space-y-3">
                     <div className="text-sm text-gray-400">
-                        Apunta la cámara al QR del conductor. El QR contiene un JSON como: {`{ "shift": "<uuid>", "fare": "troncal" }`}
+                        Apunta la cámara al QR del conductor. El QR contiene un JSON
+                        como: {`{ "shift": "<uuid>", "fare": "troncal" }`}
                     </div>
 
                     {hasCam ? (
                         <div className="overflow-hidden rounded-2xl border">
                             <QrReader
-                                constraints={{ facingMode: 'environment' }}
+                                constraints={{facingMode: 'environment'}}
                                 onResult={(result, error) => {
                                     if (!!result) {
                                         const text = result.getText()
