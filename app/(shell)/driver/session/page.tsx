@@ -4,6 +4,8 @@ import RequireRole from '@/components/RequireRole'
 import { useAuth } from '@/lib/auth'
 import { supabase } from '@/lib/supabaseClient'
 import DriverFareQR, { Fare } from '@/components/DriverFareQR'
+import {callFunction} from "@/lib/functions";
+import toast from "react-hot-toast";
 
 type Shift = {
     id: string
@@ -47,17 +49,13 @@ export default function DriverSession() {
         setBusy(true)
         try {
             const token = (await supabase.auth.getSession()).data.session?.access_token!
-            const res = await fetch(
-                `${process.env.NEXT_PUBLIC_SUPABASE_URL!.replace('.co', '.co/functions/v1')}/start_shift`,
-                {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                    body: JSON.stringify({ driver_id: userId })
-                }
-            )
-            if (!res.ok) throw new Error(await res.text())
-            const json = await res.json()
-            setShift(json.shift as Shift)
+            const res = await callFunction<{ ok: true; shift: any }>('start_shift', { driver_id: userId }, token)
+            setShift(res.shift)
+        } catch (e: any) {
+            const msg = e?.message || ''
+            if (msg.includes('NO_VEHICLE_ASSIGNED')) toast.error('No tienes vehículo asignado')
+            else if (msg.includes('SHIFT_OPEN_EXISTS')) toast.error('Ya tienes una jornada abierta')
+            else toast.error(msg)
         } finally {
             setBusy(false)
         }

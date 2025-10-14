@@ -12,6 +12,7 @@ type Vehicle = {
     plate: string
     fleet_id: string | null
     operator_id: string | null
+    current_driver_id ?: string | null
 }
 type Driver = { id: string; full_name: string }
 
@@ -102,23 +103,29 @@ export function AdminFleetManager() {
         }
     }
 
-    const assignDriver = async (e: React.FormEvent<HTMLFormElement>) => {
+    const assignDriver = async (e: React.FormEvent) => {
         e.preventDefault()
-        if (!driverId || !vehicleId) {
-            toast('Selecciona chofer y vehículo', { })
-            return
-        }
+        if (!driverId || !vehicleId) return alert('Selecciona chofer y vehículo')
         setBusy(true)
         try {
-            const token = await requireToken()
-            await callFunction('admin_assign_driver', { driver_id: driverId, vehicle_id: vehicleId }, token)
+            const token = (await supabase.auth.getSession()).data.session?.access_token!
+            const base = process.env.NEXT_PUBLIC_SUPABASE_URL!.replace('.co', '.co/functions/v1')
+            const res = await fetch(`${base}/admin_assign_driver`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ driver_id: driverId, vehicle_id: vehicleId })
+            })
+            if (!res.ok) throw new Error(await res.text())
+            // 🔄 refrescar vehicles para ver current_driver_id
+            const { data: vs } = await supabase
+                .from('vehicles')
+                .select('id, code, plate, fleet_id, operator_id, current_driver_id')
+                .order('code')
+            setVehicles(vs || [])
             toast.success('Asignación creada')
-        } catch (err: unknown) {
-            const msg = err instanceof Error ? err.message : String(err)
-            toast.error(msg)
-        } finally {
-            setBusy(false)
-        }
+        } catch (e: any) {
+            toast.error(e.message)
+        } finally { setBusy(false) }
     }
 
     return (
@@ -197,9 +204,9 @@ export function AdminFleetManager() {
                         onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setVehicleId(e.target.value)}
                     >
                         <option value="">— vehículo —</option>
-                        {vehicles.map((v) => (
+                        {vehicles.map(v => (
                             <option key={v.id} value={v.id}>
-                                {v.code} · {v.plate} {v.fleet_id ? '· (en flota)' : ''}
+                                {v.code} · {v.plate} {v.fleet_id ? '· (en flota)' : ''} {v.current_driver_id ? '· (con chofer)' : ''}
                             </option>
                         ))}
                     </select>

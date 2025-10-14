@@ -7,8 +7,8 @@ import { useRouter } from 'next/navigation'
 import toast from "react-hot-toast";
 
 export default function Page() {
-    const [email, setEmail] = useState('demo@payki.pe')
-    const [password, setPassword] = useState('demo1234')
+    const [email, setEmail] = useState('')
+    const [password, setPassword] = useState('')
     const [mode, setMode] = useState<'login' | 'signup'>('login')
     const [loading, setLoading] = useState(false)
     const { userId, profile, signOut } = useAuth()
