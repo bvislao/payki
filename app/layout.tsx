@@ -4,6 +4,7 @@ import { AuthProvider } from '@/lib/auth'
 import HeaderClient from '@/components/HeaderClient'
 import ToasterClient from "@/components/ToasterClient";
 import SWRegister from "@/components/SWRegister";
+import Footer from "@/components/Footer";
 
 export const metadata: Metadata = {
     title: 'PAYKI',
@@ -22,12 +23,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <HeaderClient />
             </header>
             <main className="container py-6">{children}</main>
-            <footer className="container py-8 text-xs text-center text-gray-500">
-                © {new Date().getFullYear()} PAYKI
-            </footer>
+            <Footer />
             <ToasterClient />
         </AuthProvider>
         <SWRegister />
+
         </body>
         </html>
     )
