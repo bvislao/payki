@@ -55,14 +55,9 @@ export default function PayQRPage() {
                 fare: obj.fare,
                 idempotencyKey: idem
             }, token)
-
-            if (!res?.ok || res.tx?.amount == null) {
-                throw new Error('Transacción inválida');
-            }
-            const amt = Number(res.tx.amount);
-            if (Number.isNaN(amt)) throw new Error('Monto inválido');
-
-            toast.success(`Pago realizado: S/ ${amt.toFixed(2)}`);
+            const { id, amount } = normalizeRidePay(res);
+            if (!res?.ok || amount == null || Number.isNaN(amount)) throw new Error('Transacción inválida');
+            toast.success(`Pago realizado: S/ ${amount.toFixed(2)}`);
             setManual('')
 
         } catch (e: any) {
@@ -75,6 +70,13 @@ export default function PayQRPage() {
         } finally {
             setBusy(false)
         }
+    }
+
+    function normalizeRidePay(res: any): { id: string|null; amount: number|null } {
+        const tx = res?.tx ?? null;
+        const id = tx?.id ?? tx?.tx_id ?? null;
+        const amount = tx?.amount ?? tx?.tx_amount ?? null;
+        return { id, amount: amount == null ? null : Number(amount) };
     }
 
     // Para evitar lecturas múltiples por el mismo cuadro, “debounce” sencillo:
@@ -101,17 +103,20 @@ export default function PayQRPage() {
                     {hasCam ? (
                         <div className="overflow-hidden rounded-2xl border">
                             <QrReader
-                                constraints={{facingMode: 'environment'}}
-                                onResult={(result, error) => {
-                                    if (!!result) {
-                                        const text = result.getText()
-                                        handlePayload(text)  // tu función
-                                    }
-                                    if (!!error) {
-                                        // suele spamear; ignóralo o muestra un log
-                                        // console.debug(error)
-                                    }
+                                constraints={{ facingMode: 'environment' }}
+                                onResult={(result) => {
+                                    if (!result) return
+                                    const now = Date.now()
+                                    // debounce simple
+                                    if ((window as any).__lastScan && now - (window as any).__lastScan < 1500) return
+                                        ;(window as any).__lastScan = now
+                                    // tu lógica:
+                                    const text = result.getText()
+                                    handlePayload(text)
+                                    // handle(text)
                                 }}
+                                videoContainerStyle={{ width: '100%', height: '100%' }}
+                                videoStyle={{ width: '100%', height: '100%', objectFit: 'cover' }}
                             />
                         </div>
                     ) : hasCam === false ? (
