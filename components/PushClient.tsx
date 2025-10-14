@@ -41,7 +41,7 @@ export default function PushClient() {
 
     return (
         <button className="btn-outline" onClick={enable} disabled={busy}>
-            {busy ? 'Activando…' : 'Activar notificaciones'}
+            {busy ? 'ACt…' : 'Act Not'}
         </button>
     )
 }

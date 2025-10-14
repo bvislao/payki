@@ -47,18 +47,25 @@ export default function PayQRPage() {
         try {
             const token = (await supabase.auth.getSession()).data.session?.access_token
             if (!token) throw new Error('Sin sesión')
-            const res = await callFunction<{ ok: true; tx: { id: string; amount: number } }>(
-                'ride_pay',
-                { shift: obj.shift, fare: obj.fare, passenger_id: userId },
-                token
-            )
+            const idem = crypto.randomUUID() // navegadores modernos
+
+            const res = await callFunction('ride_pay', {
+                passenger_id: userId,
+                shift: obj.shift,
+                fare: obj.fare,
+                idempotencyKey: idem
+            }, token)
+
+            // @ts-ignore
             toast.success(`Pago realizado: S/ ${Number(res.tx.amount).toFixed(2)}`)
             setManual('')
+
         } catch (e: any) {
             const msg = e?.message || ''
             if (msg.includes('NO_VEHICLE_ASSIGNED')) toast.error('Jornada sin vehículo')
             else if (msg.includes('SHIFT_CLOSED')) toast.error('Jornada finalizada')
             else if (msg.includes('FARE_NOT_FOUND')) toast.error('Tarifa no válida')
+            else if (msg.includes('INSUFFICIENT_FUNDS')) toast.error('Saldo insuficiente')
             else toast.error(msg || 'Error al pagar')
         } finally {
             setBusy(false)
