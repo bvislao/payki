@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabaseClient'
 import { callFunction } from '@/lib/functions'
 import toast from 'react-hot-toast'
 import dynamic from 'next/dynamic'
+import QRScanner from "@/components/QRScanner";
 const QrReader = dynamic(
     () => import('react-qr-reader').then(m => m.QrReader),
     { ssr: false }
@@ -33,117 +34,52 @@ export default function PayQRPage() {
         })()
     }, [])
 
-    const handlePayload = async (payload: string) => {
-        if (!userId) return toast.error('Inicia sesión')
-        let obj: QRPayload
+    const handleText = async (text: string) => {
+        // Acepta URL tipo: payki://ride?shift=...&fare=... o https://.../user/pay-qr?... o JSON
+        let shift: string | undefined
+        let fare: string | undefined
         try {
-            obj = JSON.parse(payload)
-            if (!obj.shift || !obj.fare) throw new Error('Formato inválido')
+            if (text.startsWith('http') || text.startsWith('payki://')) {
+                const u = new URL(text.replace('payki://', 'https://payki.local/'))
+                shift = u.searchParams.get('shift') || undefined
+                fare  = u.searchParams.get('fare')  || undefined
+            } else {
+                const obj = JSON.parse(text)
+                shift = obj.shift
+                fare  = obj.fare
+            }
         } catch {
-            return toast.error('QR inválido')
+            toast.error('Formato de QR no válido')
+            return
         }
+        if (!shift || !fare) { toast.error('Faltan datos en el QR'); return }
 
+        if (!userId) { toast.error('Inicia sesión'); return }
         setBusy(true)
         try {
-            const token = (await supabase.auth.getSession()).data.session?.access_token
-            if (!token) throw new Error('Sin sesión')
-            const idem = crypto.randomUUID() // navegadores modernos
+            const token = (await supabase.auth.getSession()).data.session?.access_token!
+            const idem = crypto.randomUUID()
+            const res = await callFunction<any>('ride_pay', { passenger_id: userId, shift, fare, idempotencyKey: idem }, token)
 
-            const res = await callFunction('ride_pay', {
-                passenger_id: userId,
-                shift: obj.shift,
-                fare: obj.fare,
-                idempotencyKey: idem
-            }, token)
-            const { id, amount } = normalizeRidePay(res);
-            if (!res?.ok || amount == null || Number.isNaN(amount)) throw new Error('Transacción inválida');
-            toast.success(`Pago realizado: S/ ${amount.toFixed(2)}`);
-            setManual('')
+            const row = res?.tx ?? null;
+            //const id = row?.id ?? row?.tx_id ?? null;
+            const amount = row?.amount ?? row?.tx_amount ?? null;
+            if (!res?.ok || Number.isNaN(amount)) throw new Error('Transacción inválida')
 
-        } catch (e: any) {
-            const msg = e?.message || ''
-            if (msg.includes('NO_VEHICLE_ASSIGNED')) toast.error('Jornada sin vehículo')
-            else if (msg.includes('SHIFT_CLOSED')) toast.error('Jornada finalizada')
-            else if (msg.includes('FARE_NOT_FOUND')) toast.error('Tarifa no válida')
-            else if (msg.includes('INSUFFICIENT_FUNDS')) toast.error('Saldo insuficiente')
-            else toast.error(msg || 'Error al pagar')
-        } finally {
-            setBusy(false)
-        }
-    }
-
-    function normalizeRidePay(res: any): { id: string|null; amount: number|null } {
-        const tx = res?.tx ?? null;
-        const id = tx?.id ?? tx?.tx_id ?? null;
-        const amount = tx?.amount ?? tx?.tx_amount ?? null;
-        return { id, amount: amount == null ? null : Number(amount) };
-    }
-
-    // Para evitar lecturas múltiples por el mismo cuadro, “debounce” sencillo:
-    const [lastScan, setLastScan] = useState(0)
-    const onScan = (values: string[]) => {
-        const now = Date.now()
-        if (now - lastScan < 1500) return
-        setLastScan(now)
-        if (values?.[0]) handlePayload(values[0])
+            toast.success(`Pago realizado: S/ ${amount.toFixed(2)}`)
+        } catch (e:any) {
+            toast.error(e?.message ?? 'Error al pagar')
+        } finally { setBusy(false) }
     }
 
     return (
         <RequireRole role="passenger">
-            <div className="max-w-2xl mx-auto card p-6 space-y-5">
+            <div className="max-w-2xl mx-auto card p-6 space-y-4">
                 <h2 className="text-2xl font-semibold">Pagar Pasaje (QR)</h2>
-
-                {/* Bloque de escaneo por cámara */}
-                <div className="space-y-3">
-                    <div className="text-sm text-gray-400">
-                        Apunta la cámara al QR del conductor. El QR contiene un JSON
-                        como: {`{ "shift": "<uuid>", "fare": "troncal" }`}
-                    </div>
-
-                    {hasCam ? (
-                        <div className="overflow-hidden rounded-2xl border">
-                            <QrReader
-                                constraints={{ facingMode: 'environment' }}
-                                onResult={(result) => {
-                                    if (!result) return
-                                    const now = Date.now()
-                                    // debounce simple
-                                    if ((window as any).__lastScan && now - (window as any).__lastScan < 1500) return
-                                        ;(window as any).__lastScan = now
-                                    // tu lógica:
-                                    const text = result.getText()
-                                    handlePayload(text)
-                                    // handle(text)
-                                }}
-                                videoContainerStyle={{ width: '100%', height: '100%' }}
-                                videoStyle={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                            />
-                        </div>
-                    ) : hasCam === false ? (
-                        <div className="rounded-xl border p-4 text-sm text-amber-600">
-                            No se detectó cámara (o el navegador no dio permiso). Usa la entrada manual más abajo.
-                        </div>
-                    ) : (
-                        <div className="text-sm text-gray-400">Comprobando cámara…</div>
-                    )}
-                </div>
-
-                {/* Fallback: pegar el payload manualmente */}
-                <div className="rounded-2xl border p-4 space-y-3">
-                    <div className="text-sm text-gray-400">¿No puedes usar la cámara? Pega el contenido del QR:</div>
-                    <textarea
-                        className="w-full rounded-xl border px-3 py-2 min-h-[120px] bg-white dark:bg-gray-900"
-                        placeholder='{"shift":"<uuid>","fare":"troncal"}'
-                        value={manual}
-                        onChange={(e) => setManual(e.target.value)}
-                    />
-                    <div className="flex gap-3">
-                        <button className="btn" disabled={busy} onClick={() => handlePayload(manual)}>
-                            {busy ? 'Procesando…' : 'Pagar con payload'}
-                        </button>
-                        <button className="btn-outline" onClick={() => setManual('')}>Limpiar</button>
-                    </div>
-                </div>
+                <QRScanner onText={handleText} height={360} />
+                <button className="btn w-full mt-3" disabled={busy}>
+                    {busy ? 'Procesando…' : 'Listo'}
+                </button>
             </div>
         </RequireRole>
     )

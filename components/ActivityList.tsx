@@ -3,6 +3,7 @@ import { ArrowDownRight, ArrowUpRight, Clock } from 'lucide-react'
 import { useStore } from '@/lib/store'
 export default function ActivityList() {
     const { activity } = useStore()
+    console.log('activity', activity)
     return (
         <div className="card p-4">
             <h3 className="font-semibold mb-3">Actividad Reciente</h3>
