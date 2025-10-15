@@ -7,8 +7,10 @@ import { callFunction } from '@/lib/functions'
 import toast from 'react-hot-toast'
 import dynamic from 'next/dynamic'
 import QRScanner from "@/components/QRScanner";
+import {useRouter} from "next/navigation";
 
 export default function PayQRPage() {
+    const router = useRouter()
     const {userId} = useAuth()
     const [busy, setBusy] = useState(false)
     const [manual, setManual] = useState('')              // fallback manual
@@ -54,6 +56,8 @@ export default function PayQRPage() {
             const amount = row?.amount ?? row?.tx_amount ?? null;
             if (!res?.ok || Number.isNaN(amount)) throw new Error('Transacción inválida')
             toast.success(`Pago realizado: S/ ${amount.toFixed(2)}`)
+            // regresar a /user
+            router.push('/user')
         } catch (e: any) {
             toast.error(e?.message ?? 'Error al pagar')
         }
