@@ -1,78 +1,96 @@
+// components/QRScanner.tsx
 'use client'
 
-import dynamic from 'next/dynamic'
-import {useEffect, useRef, useState} from 'react'
-import toast from 'react-hot-toast'
-
-// Import dinámico sin SSR (muy importante en Next App Router)
-const QrReader = dynamic(
-    () => import('react-qr-reader').then(m => m.QrReader),
-    { ssr: false }
-)
+import { useEffect, useRef, useState } from 'react'
+import {
+    BrowserQRCodeReader,
+    IScannerControls,
+} from '@zxing/browser'
 
 type Props = {
     onText: (text: string) => void
-    height?: number // alto del contenedor, ej. 320
+    height?: number
 }
 
-export default function QRScanner({ onText, height = 320 }: Props) {
-    const [ready, setReady] = useState(false)        // montar lector tras clic
+export default function QRScanner({ onText, height = 360 }: Props) {
+    const [ready, setReady] = useState(false)                 // gesto del usuario (iOS)
     const [devices, setDevices] = useState<MediaDeviceInfo[]>([])
     const [deviceId, setDeviceId] = useState<string | undefined>(undefined)
-    const lastScanRef = useRef(0)
+    const [status, setStatus] = useState<string>('Pulsa “Activar cámara”')
+    const videoRef = useRef<HTMLVideoElement>(null)
+    const readerRef = useRef<BrowserQRCodeReader | null>(null)
+    const controlsRef = useRef<IScannerControls | null>(null)
+    const lastScan = useRef(0)
 
-    // Listar cámaras
+    // listar cámaras
     useEffect(() => {
-        if (!navigator.mediaDevices?.enumerateDevices) return
-        navigator.mediaDevices.enumerateDevices().then(list => {
-            const cams = list.filter(d => d.kind === 'videoinput')
+        (async () => {
+            try {
+                const streamPerm = await navigator.mediaDevices.getUserMedia({ video: true })
+                streamPerm.getTracks().forEach(t => t.stop())
+            } catch {} // solo para forzar permiso prompt
+
+            const all = await navigator.mediaDevices.enumerateDevices()
+            const cams = all.filter(d => d.kind === 'videoinput')
             setDevices(cams)
-            // si hay cámara trasera, intenta elegirla
-            const back = cams.find(d => /back|trase|rear|environment/i.test(d.label))
+
+            // intenta la trasera
+            const back = cams.find(d => /back|rear|environment|trase/i.test(d.label))
             setDeviceId((back ?? cams[0])?.deviceId)
-        }).catch(() => {})
+        })().catch(() => {})
     }, [])
+
+    const stop = () => {
+        controlsRef.current?.stop()
+        controlsRef.current = null
+        const tracks = (videoRef.current?.srcObject as MediaStream | null)?.getTracks() || []
+        tracks.forEach(t => t.stop())
+        if (videoRef.current) videoRef.current.srcObject = null
+    }
+
+    useEffect(() => () => stop(), [])
 
     const handleDecode = (text: string) => {
         const now = Date.now()
-        if (now - lastScanRef.current < 1200) return // debounce 1.2s
-        lastScanRef.current = now
+        if (now - lastScan.current < 1200) return // debounce
+        lastScan.current = now
         onText(text)
     }
 
-    const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0]
-        if (!file) return
+    const start = async () => {
+        if (!videoRef.current) return
         try {
-            // Decodifica por imagen subida (fallback)
-            const { BrowserQRCodeReader } = await import('@zxing/browser')
-            const reader = new BrowserQRCodeReader()
-            const imgUrl = URL.createObjectURL(file)
-            const res = await reader.decodeFromImageUrl(imgUrl)
-            URL.revokeObjectURL(imgUrl)
-            handleDecode(res.getText())
-        } catch (err: any) {
-            toast.error('No se pudo leer el QR de la imagen')
-        } finally {
-            e.target.value = ''
+            setReady(true)
+            setStatus('Iniciando cámara…')
+            stop()
+
+            if (!readerRef.current) readerRef.current = new BrowserQRCodeReader()
+
+            // decodeFromVideoDevice acepta deviceId (o undefined para auto)
+            controlsRef.current = await readerRef.current.decodeFromVideoDevice(
+                deviceId,
+                videoRef.current,
+                (result, err, controls) => {
+                    if (result) {
+                        setStatus('QR leído ✅')
+                        handleDecode(result.getText())
+                    } else if (err) {
+                        // errores de escaneo son normales (no spamear)
+                    }
+                }
+            )
+
+            setStatus('Cámara activa ✅')
+        } catch (e: any) {
+            setStatus(`Error: ${e?.name || e?.message || e}`)
         }
     }
 
     return (
         <div className="w-full max-w-md mx-auto">
-            {/* Botón para activar cámara (gesto de usuario → iOS) */}
-            {!ready ? (
-                <button
-                    className="btn w-full mb-3"
-                    onClick={() => setReady(true)}
-                >
-                    Activar cámara
-                </button>
-            ) : null}
-
-            {/* Selector de cámara si hay varias */}
-            {ready && devices.length > 1 && (
-                <label className="block text-sm mb-2">
+            {/* selector y botón */}
+            <div className="grid gap-2 mb-3">
+                <label className="text-sm">
                     Cámara
                     <select
                         className="mt-1 w-full rounded-xl border px-3 py-2"
@@ -81,55 +99,33 @@ export default function QRScanner({ onText, height = 320 }: Props) {
                     >
                         {devices.map(d => (
                             <option key={d.deviceId} value={d.deviceId}>
-                                {d.label || `Cámara ${d.deviceId.slice(0,4)}…`}
+                                {d.label || `Cámara ${d.deviceId.slice(0, 4)}…`}
                             </option>
                         ))}
                     </select>
                 </label>
-            )}
+                <button className="btn" onClick={start}>Activar cámara</button>
+            </div>
 
-            {/* Contenedor con altura explícita y overflow-hidden */}
-            <div
-                className="relative w-full rounded-2xl border overflow-hidden bg-black/40"
-                style={{ height }}
-            >
-                {ready ? (
-                    <QrReader
-                        constraints={{
-                            // Si hay deviceId, úsalo; si no, pide environment
-                            ...(deviceId ? { deviceId: { exact: deviceId } } : { facingMode: 'environment' })
-                        }}
-                        onResult={(result) => {
-                            if (result) handleDecode(result.getText())
-                        }}
-                        // Asegura que el video ocupe el contenedor
-                        videoContainerStyle={{ width: '100%', height: '100%' }}
-                        videoStyle={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                    />
-                ) : (
-                    <div className="absolute inset-0 grid place-items-center text-white/80 text-sm">
-                        Permite cámara y pulsa “Activar cámara”
-                    </div>
-                )}
-
-                {/* Máscara/retícula opcional */}
+            {/* contenedor con altura fija → sin alto 0 */}
+            <div className="relative w-full rounded-2xl border overflow-hidden bg-black/40" style={{ height }}>
+                <video
+                    ref={videoRef}
+                    muted
+                    playsInline
+                    autoPlay
+                    style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                />
+                {/* Marco visual */}
                 <div className="pointer-events-none absolute inset-0">
                     <div className="absolute inset-8 border-2 border-white/70 rounded-xl" />
                 </div>
             </div>
 
-            {/* Fallback: subir foto con el QR */}
-            {/*<div className="mt-3 text-center">
-                <label className="btn-outline cursor-pointer">
-                    Leer desde imagen…
-                    <input type="file" accept="image/*" className="hidden" onChange={onFile}/>
-                </label>
-            </div>*/}
-
-            {/* Notas rápidas */}
-            <ul className="mt-3 text-xs text-gray-500 space-y-1">
-                <li>• En iPhone/Safari necesitas HTTPS o localhost, y dar permisos.</li>
-                <li>• Si la vista es muy pequeña, aumenta el alto (prop <code>height</code>).</li>
+            <div className="text-xs mt-2 text-gray-500">{status}</div>
+            <ul className="mt-2 text-xs text-gray-500 space-y-1">
+                <li>• iPhone/Safari/PWA: HTTPS o localhost y dar permisos de cámara.</li>
+                <li>• Si queda negra, cambia de cámara en el selector y vuelve a “Activar cámara”.</li>
             </ul>
         </div>
     )
