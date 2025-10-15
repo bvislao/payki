@@ -4,6 +4,16 @@ const isProd = process.env.NODE_ENV === 'production'
 
 const nextConfig: NextConfig = {
     // Solo en producción queremos estático y carpeta build
+    async headers() {
+        return [
+            {
+                source: '/:path*',
+                headers: [
+                    { key: 'Permissions-Policy', value: 'camera=(self), microphone=(), geolocation=(self)' },
+                ],
+            },
+        ]
+    },
     ...(isProd ? { output: 'export', images: { unoptimized: true } } : {}),
     distDir: isProd ? 'build' : '.next',
     reactStrictMode: false,
