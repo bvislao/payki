@@ -15,32 +15,89 @@ self.addEventListener('activate', (e) => {
 });
 
 self.addEventListener('fetch', (e) => {
-    const { request } = e;
-    // Sólo GET y mismo origen
-    if (request.method !== 'GET' || new URL(request.url).origin !== self.location.origin) return;
+    const req = e.request;
+    const url = new URL(req.url);
 
-    const url = new URL(request.url);
+    // 1) NO tocar preflight ni CORS (otra origin), y solo manejar GET
+    if (req.method === 'OPTIONS') return;
+    if (url.origin !== self.location.origin) return;
+    if (req.method !== 'GET') return;
 
-    // ⚠️ No interceptar nada de Next.js, HMR o mapas de error
+    // 2) Ignorar rutas especiales de Next.js (HMR, errores, etc.)
     if (
         url.pathname.startsWith('/_next/') ||
         url.pathname.includes('hot-update') ||
         url.pathname.startsWith('/__nextjs_original-stack-frame')
     ) {
-        return; // deja pasar
+        return; // dejar pasar al navegador
     }
 
-    // Cache-first para assets simples; network-first para el resto
-    const isAsset = ASSETS.includes(url.pathname) || url.pathname.startsWith('/icons/');
+    // 3) Clasificación simple por tipo de recurso/estrategia
+    const isIcon = url.pathname.startsWith('/icons/');
+    const isPrecachedAsset = (typeof ASSETS !== 'undefined') && ASSETS.includes(url.pathname);
+    const isStaticAsset =
+        isIcon ||
+        isPrecachedAsset ||
+        /\.(?:css|js|woff2?|png|jpg|jpeg|gif|svg|webp)$/.test(url.pathname);
+
+    const isApi = url.pathname.startsWith('/api/'); // Next API same-origin (opcional)
+    const isNavigation = req.mode === 'navigate';
+
+    // 4) Navegaciones (páginas): Network-first con fallback a cache (o '/')
+    if (isNavigation) {
+        e.respondWith(
+            fetch(req)
+                .then((res) => {
+                    if (res && res.ok) {
+                        const copy = res.clone();
+                        caches.open(CACHE_NAME).then((c) => c.put(req, copy));
+                    }
+                    return res;
+                })
+                .catch(async () => (await caches.match(req)) || (await caches.match('/')))
+        );
+        return;
+    }
+
+    // 5) Assets estáticos: Cache-first + revalidación en background
+    if (isStaticAsset) {
+        e.respondWith(
+            caches.match(req).then((cached) => {
+                const fetchAndUpdate = fetch(req)
+                    .then((res) => {
+                        if (res && res.ok) {
+                            const copy = res.clone();
+                            caches.open(CACHE_NAME).then((c) => c.put(req, copy));
+                        }
+                        return res;
+                    })
+                    .catch(() => cached); // si falla red, devolvemos el cache (si existe)
+
+                return cached || fetchAndUpdate;
+            })
+        );
+        return;
+    }
+
+    // 6) API same-origin: Network-first (no cachear por defecto)
+    if (isApi) {
+        e.respondWith(
+            fetch(req).catch(() => caches.match(req)) // opcional: sin cache, o con fallback si antes se guardó
+        );
+        return;
+    }
+
+    // 7) Resto de GET same-origin: Network-first con fallback desde cache
     e.respondWith(
-        (isAsset
-                ? caches.match(request).then((cached) => cached || fetch(request).then((r) => {
-                    const copy = r.clone(); caches.open(CACHE_NAME).then(c => c.put(request, copy)); return r;
-                }))
-                : fetch(request).then((r) => {
-                    const copy = r.clone(); caches.open(CACHE_NAME).then(c => c.put(request, copy)); return r;
-                }).catch(() => caches.match(request).then((m) => m || caches.match('/')))
-        )
+        fetch(req)
+            .then((res) => {
+                if (res && res.ok) {
+                    const copy = res.clone();
+                    caches.open(CACHE_NAME).then((c) => c.put(req, copy));
+                }
+                return res;
+            })
+            .catch(() => caches.match(req))
     );
 });
 
