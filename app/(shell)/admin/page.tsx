@@ -7,6 +7,7 @@ import {broadcastPush, callFunction} from '@/lib/functions'
 import { AdminFleetManager } from '@/components/AdminFleetManager'
 import { AdminVehiclesByFleet } from '@/components/AdminFleetVehicleManager'
 import toast from "react-hot-toast";
+import AdminBroadcastForm from '@/components/AdminBroadcastForm'
 
 type FareRow = { code: string; label: string; base_amount: number }
 type Vehicle = { id: string; code: string; plate: string; active: boolean }
@@ -179,7 +180,7 @@ export default function AdminPage() {
                 </div>
             </div>
 
-            <form
+            {/*<form
                 onSubmit={async (e) => {
                     e.preventDefault()
                     const title = (e.currentTarget.elements.namedItem('title') as HTMLInputElement).value
@@ -193,7 +194,8 @@ export default function AdminPage() {
                 <input name="title" className="rounded-xl border px-3 py-2" placeholder="Título" />
                 <input name="body"  className="rounded-xl border px-3 py-2" placeholder="Mensaje" />
                 <button className="btn">Enviar</button>
-            </form>
+            </form>*/}
+            <AdminBroadcastForm />
 
             <AdminFleetManager />
 
