@@ -65,19 +65,15 @@ export default function PushClient() {
                 }
             }
 
-            await subscribePush(vapid, async ({ endpoint, p256dh, auth }) => {
-                // Nota: si tu tabla no tiene user_agent, quita ese campo del upsert
-                const { error } = await supabase.from('push_subscriptions').upsert(
-                    {
-                        user_id: userId,
-                        endpoint,
-                        p256dh,
-                        auth,
-                        user_agent: navigator.userAgent,
-                    },
-                    { onConflict: 'endpoint' }
-                )
-                if (error) throw error
+            await registerSW()
+            await subscribePush(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!, async (p) => {
+                await supabase.from('push_subscriptions').upsert({
+                    user_id: userId,
+                    endpoint: p.endpoint,
+                    p256dh: p.p256dh,
+                    auth: p.auth,
+                    user_agent: navigator.userAgent,
+                }, { onConflict: 'endpoint' })
             })
 
             setSubscribed(true)

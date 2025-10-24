@@ -32,26 +32,24 @@ export async function registerSW(): Promise<ServiceWorkerRegistration | null> {
     return await navigator.serviceWorker.register('/sw.js');
 }
 
-export async function subscribePush(vapidPublicKey: string, save: SaveFn) {
-    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-        throw new Error('Push no soportado en este navegador');
-    }
-    const perm = await Notification.requestPermission();
-    if (perm !== 'granted') throw new Error('Permiso de notificaciones denegado');
+export async function subscribePush(
+    vapidPublicKey: string,
+    onSave: (p:{endpoint:string;p256dh:string;auth:string})=>Promise<void>
+) {
+    const reg = await navigator.serviceWorker.ready
+    const newKey = urlBase64ToUint8Array(vapidPublicKey)
 
-    const reg = await navigator.serviceWorker.ready; // ya registrado
-    const existing = await reg.pushManager.getSubscription();
-    if (existing) {
-        const keys = existing.toJSON().keys as { p256dh: string; auth: string };
-        await save({ endpoint: existing.endpoint, p256dh: keys.p256dh, auth: keys.auth });
-        return true;
+    const current = await reg.pushManager.getSubscription()
+    if (current) {
+        // ¿Se suscribió con otra applicationServerKey?
+        const opts = await (current as any).getOptions?.()
+        const sameKey = opts?.applicationServerKey &&
+            new Uint8Array(opts.applicationServerKey).toString() === newKey.toString()
+        if (!sameKey) await current.unsubscribe()
     }
 
-    const sub = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
-    });
-    const keys = sub.toJSON().keys as { p256dh: string; auth: string };
-    await save({ endpoint: sub.endpoint, p256dh: keys.p256dh, auth: keys.auth });
-    return true;
+    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: newKey })
+    const json = sub.toJSON()
+    // @ts-ignore
+    await onSave({ endpoint: sub.endpoint, p256dh: json.keys.p256dh, auth: json.keys.auth })
 }

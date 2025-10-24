@@ -1,11 +1,11 @@
 'use client'
-import {useEffect, useState} from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import RequireRole from '@/components/RequireRole'
-import {useAuth} from '@/lib/auth'
-import {supabase} from '@/lib/supabaseClient'
-import DriverFareQR, {Fare} from '@/components/DriverFareQR'
-import {callFunction} from "@/lib/functions";
-import toast from "react-hot-toast";
+import { useAuth } from '@/lib/auth'
+import { supabase } from '@/lib/supabaseClient'
+import DriverFareQR, { Fare } from '@/components/DriverFareQR'
+import { callFunction } from '@/lib/functions'
+import toast from 'react-hot-toast'
 
 type Shift = {
     id: string
@@ -16,85 +16,102 @@ type Shift = {
     started_at: string
 }
 
-type Tx = { id: string; amount: number; type: 'ride' | 'topup'; ts?: string }
-
+type TxRow = {
+    id: string
+    amount: number
+    type: 'ride' | 'topup'
+    ts?: string
+    meta?: { shift_id?: string; fare_code?: string }
+}
 
 export default function DriverSession() {
-    const {userId, profile} = useAuth()
-    const [txs, setTxs] = useState<Tx[]>([])
+    const { userId, profile } = useAuth()
+    const [txs, setTxs] = useState<TxRow[]>([])
     const [count, setCount] = useState(0)
     const [sum, setSum] = useState(0)
     const [shift, setShift] = useState<Shift | null>(null)
     const [fares, setFares] = useState<Fare[]>([])
     const [busy, setBusy] = useState(false)
 
-    // cargar shift activo
+    // Evitar duplicados cuando llegan múltiples eventos
+    const seen = useRef<Set<string>>(new Set())
+
+    // Sonido opcional al recibir pago
+    const cashAudio = useMemo(() => {
+        if (typeof Audio === 'undefined') return null
+        try { return new Audio('/sounds/cash.mp3') } catch { return null }
+    }, [])
+
+    // 1) Cargar turno activo + transacciones del día
     useEffect(() => {
         if (!userId) return
 
+        // turno abierto
         supabase
             .from('driver_shifts')
             .select('*')
             .eq('driver_id', userId)
             .eq('status', 'open')
             .maybeSingle()
-            .then(({data}) => data && setShift(data as Shift))
+            .then(({ data }) => data && setShift(data as Shift))
 
-        // 1) Carga inicial opcional (de hoy)
+        // transacciones del día (solo ride)
         ;(async () => {
             const today = new Date().toISOString().slice(0, 10)
-            const {data} = await supabase
+            const { data } = await supabase
                 .from('transactions')
-                .select('id, amount, type, ts')
+                .select('id, amount, type, ts, meta')
                 .eq('driver_id', userId)
                 .eq('type', 'ride')
                 .gte('ts', `${today}T00:00:00Z`)
-                .order('ts', {ascending: false})
-            const list = (data || []) as Tx[]
+                .order('ts', { ascending: false })
+            const list = (data || []) as TxRow[]
             setTxs(list)
             setCount(list.length)
             setSum(list.reduce((s, t) => s + Number(t.amount || 0), 0))
+            list.forEach(t => seen.current.add(t.id))
         })()
+    }, [userId])
 
+    // 2) Realtime: escuchar INSERT en transactions del conductor
+    useEffect(() => {
+        if (!userId) return
         const channel = supabase
             .channel(`tx_driver_${userId}`)
             .on(
                 'postgres_changes',
-                {
-                    event: 'INSERT',
-                    schema: 'public',
-                    table: 'transactions',
-                    filter: `driver_id=eq.${userId}`
-                },
+                { event: 'INSERT', schema: 'public', table: 'transactions', filter: `driver_id=eq.${userId}` },
                 (payload) => {
-                    const row = payload.new as any
+                    const row = payload.new as TxRow
                     if (row?.type !== 'ride') return
-                    const amt = Number(row.amount ?? 0)
-                    setTxs(prev => [{id: row.id, amount: amt, type: 'ride', ts: row.ts}, ...prev])
-                    setCount(prev => prev + 1)
-                    setSum(prev => prev + amt)
-                    // opcional: vibración/sonido
-                    if (navigator.vibrate) navigator.vibrate(60)
+                    // si hay turno, limitar al shift actual para evitar ruido
+                    if (shift && row?.meta?.shift_id && row.meta.shift_id !== shift.id) return
+
+                    if (!seen.current.has(row.id)) {
+                        seen.current.add(row.id)
+                        const amt = Number(row.amount ?? 0)
+                        setTxs(prev => [{ ...row, amount: amt }, ...prev])
+                        setCount(prev => prev + 1)
+                        setSum(prev => prev + amt)
+                        toast.success(`Pago recibido: S/ ${amt.toFixed(2)}`)
+                        cashAudio?.play().catch(() => {})
+                        if (navigator.vibrate) navigator.vibrate(60)
+                    }
                 }
             )
-            .subscribe((status) => {
-                // opcional: logging
-                // console.log('Realtime status', status)
-            })
-        return () => {
-            supabase.removeChannel(channel)
-        }
+            .subscribe()
+        return () => { supabase.removeChannel(channel) }
+        // Dependemos de shift?.id para que, si cambia de turno, el filtro lógico se aplique
+    }, [userId, shift?.id, cashAudio])
 
-    }, [userId])
-
-    // cargar tarifas del operador del shift
+    // 3) Cargar tarifas del operador del shift
     useEffect(() => {
         if (!shift) return
         supabase
             .from('fares')
             .select('id,code,label,base_amount')
             .eq('operator_id', shift.operator_id)
-            .then(({data}) => setFares((data || []) as Fare[]))
+            .then(({ data }) => setFares((data || []) as Fare[]))
     }, [shift])
 
     const startShift = async () => {
@@ -102,10 +119,13 @@ export default function DriverSession() {
         setBusy(true)
         try {
             const token = (await supabase.auth.getSession()).data.session?.access_token!
-            const res = await callFunction<{ ok: true; shift: any }>('start_shift', {driver_id: userId}, token)
+            const res = await callFunction<{ ok: true; shift: Shift }>('start_shift', { driver_id: userId }, token)
             setShift(res.shift)
-        } catch (e: any) {
-            const msg = e?.message || ''
+            toast.success('Jornada iniciada')
+            // Reset acumuladores/duplicados al iniciar turno
+            setTxs([]); setCount(0); setSum(0); seen.current.clear()
+        } catch (e: unknown) {
+            const msg = e instanceof Error ? e.message : String(e)
             if (msg.includes('NO_VEHICLE_ASSIGNED')) toast.error('No tienes vehículo asignado')
             else if (msg.includes('SHIFT_OPEN_EXISTS')) toast.error('Ya tienes una jornada abierta')
             else toast.error(msg)
@@ -118,9 +138,10 @@ export default function DriverSession() {
         if (!shift) return
         await supabase
             .from('driver_shifts')
-            .update({status: 'closed', ended_at: new Date().toISOString()})
+            .update({ status: 'closed', ended_at: new Date().toISOString() })
             .eq('id', shift.id)
         setShift(null)
+        toast.success('Jornada finalizada')
     }
 
     return (
@@ -139,17 +160,17 @@ export default function DriverSession() {
                         Conductor {profile?.full_name} · Vehículo {shift.vehicle_id}
                     </p>
                     <div className="flex items-center gap-2 text-sm">
-          <span className="px-2 py-1 rounded-full bg-emerald-600/10 text-emerald-700">
-            Pasajeros: {count}
-          </span>
+            <span className="px-2 py-1 rounded-full bg-emerald-600/10 text-emerald-700">
+              Pasajeros: {count}
+            </span>
                         <span className="px-2 py-1 rounded-full bg-blue-600/10 text-blue-700">
-            S/ {sum.toFixed(2)}
-          </span>
+              S/ {sum.toFixed(2)}
+            </span>
                     </div>
 
                     <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
                         {fares.map((f) => (
-                            <DriverFareQR key={f.id} shiftId={shift.id} fare={f}/>
+                            <DriverFareQR key={f.id} shiftId={shift.id} fare={f} />
                         ))}
                     </div>
 
@@ -157,7 +178,7 @@ export default function DriverSession() {
                     <ul className="text-sm divide-y">
                         {txs.map(t => (
                             <li key={t.id} className="py-2 flex justify-between">
-                                <span>Pago de pasaje</span>
+                                <span>Pago {t.meta?.fare_code ? `— ${t.meta.fare_code}` : ''}</span>
                                 <span className="text-green-600">+S/ {Number(t.amount).toFixed(2)}</span>
                             </li>
                         ))}
