@@ -14,7 +14,6 @@ self.addEventListener('activate', (e) => {
     );
 });
 
-// En tu /public/sw.js
 self.addEventListener('fetch', (e) => {
     const req = e.request;
     const url = new URL(req.url);
