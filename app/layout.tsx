@@ -5,6 +5,7 @@ import HeaderClient from '@/components/HeaderClient'
 import ToasterClient from "@/components/ToasterClient";
 import SWRegister from "@/components/SWRegister";
 import Footer from "@/components/Footer";
+import Providers from "./providers";
 
 export const metadata: Metadata = {
     title: 'PAYKI',
@@ -18,16 +19,15 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <link rel="manifest" href="/manifest.json" />
         </head>
         <body suppressHydrationWarning>
-        <AuthProvider>
+        <Providers>
             <header className="sticky top-0 z-30 backdrop-blur border-b border-gray-200/60 dark:border-gray-800 bg-white/70 dark:bg-gray-950/70">
                 <HeaderClient />
             </header>
             <main className="container py-6">{children}</main>
             <Footer />
             <ToasterClient />
-        </AuthProvider>
         <SWRegister />
-
+        </Providers>
         </body>
         </html>
     )

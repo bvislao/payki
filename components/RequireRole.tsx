@@ -1,15 +1,14 @@
 'use client'
 import { useAuth } from '@/lib/auth'
+import { useRouter } from 'next/navigation'
 
-export default function RequireRole({
-                                        role, children
-                                    }: { role: 'driver'|'passenger'|'admin', children: React.ReactNode }) {
-    const { userId,profile, loading } = useAuth()
-    if (loading) return <div className="card p-6">Cargando…</div>
-    if (!userId) return <div className="card p-6">Inicia sesión.</div>
-    if(!profile) return <div className="card p-6">Perfil no encontrado.</div>
-    if (role === 'passenger' && profile.role !== 'passenger') return <div className="card p-6">Solo para pasajeros.</div>
-    if (role === 'driver' && profile.role !== 'driver') return <div className="card p-6">Solo para conductores.</div>
-    if (role === 'admin' && profile.role !== 'admin') return <div className="card p-6">Solo admins.</div>
+export default function RequireRole({ role, children }:{ role:'passenger'|'driver'|'admin', children:React.ReactNode }) {
+    const { loading, userId, profile } = useAuth()
+    const router = useRouter()
+
+    if (loading) return <div className="p-6 text-sm text-gray-500">Cargando…</div>
+    if (!userId) { router.push('/login'); return null }
+    if (profile?.role !== role) return <div className="p-6">Acceso denegado</div>
+
     return <>{children}</>
 }
