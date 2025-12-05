@@ -6,8 +6,8 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 
 export default function Page() {
-    const [email, setEmail] = useState('demo@payki.pe')
-    const [password, setPassword] = useState('demo1234')
+    const [email, setEmail] = useState('')
+    const [password, setPassword] = useState('')
     const [mode, setMode] = useState<'login'|'signup'>('login')
     const [loadingForm, setLoadingForm] = useState(false)
     const { userId, profile, loading, signOut } = useAuth()
