@@ -9,8 +9,7 @@ export default function Providers({children}: { children: React.ReactNode }) {
         <LoadingProvider>
             <AuthProvider>
                 <AppClientShell>
-                    {children}
-                    <GlobalLoadingOverlay/>
+                   {children}
                 </AppClientShell>
             </AuthProvider>
         </LoadingProvider>
