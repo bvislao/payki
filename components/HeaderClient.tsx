@@ -54,7 +54,7 @@ export default function HeaderClient() {
                     </Link>
                 ))}
 
-                {userId && <PushClient />}
+                {/*{userId && <PushClient />}*/}
 
                 {userId ? (
                     <button

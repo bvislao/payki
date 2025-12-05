@@ -1,4 +1,3 @@
-// lib/auth.tsx
 'use client'
 
 import {
@@ -25,7 +24,10 @@ type AuthCtx = {
     userId: string | null
     email: string | null
     profile: Profile | null
+    /** Solo al iniciar la app por primera vez */
     loading: boolean
+    /** Actualizaciones en segundo plano: no bloquean la UI */
+    syncing: boolean
     error: string | null
     refreshProfile: () => Promise<void>
     signOut: () => Promise<void>
@@ -33,20 +35,14 @@ type AuthCtx = {
 
 const Ctx = createContext<AuthCtx | null>(null)
 
-/** Convierte PromiseLike → Promise y aplica timeout para evitar “cargando infinito”. */
+/** Promise con timeout para evitar “cargando infinito”. */
 function runWithTimeout<T>(p: PromiseLike<T>, ms = 4000): Promise<T> {
     const real = Promise.resolve(p)
     return new Promise<T>((resolve, reject) => {
         const t = setTimeout(() => reject(new Error('TIMEOUT')), ms)
         real.then(
-            (v) => {
-                clearTimeout(t)
-                resolve(v)
-            },
-            (e) => {
-                clearTimeout(t)
-                reject(e)
-            },
+            (v) => { clearTimeout(t); resolve(v) },
+            (e) => { clearTimeout(t); reject(e) },
         )
     })
 }
@@ -55,19 +51,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const [userId, setUserId] = useState<string | null>(null)
     const [email, setEmail] = useState<string | null>(null)
     const [profile, setProfile] = useState<Profile | null>(null)
+
+    // ⬇️ “booting” (loading) solo en el arranque
     const [loading, setLoading] = useState(true)
+    // ⬇️ “syncing” para background refresh sin bloquear UI
+    const [syncing, setSyncing] = useState(false)
+
     const [error, setError] = useState<string | null>(null)
     const mounted = useRef(true)
-
-    useEffect(() => {
-        return () => {
-            mounted.current = false
-        }
-    }, [])
+    useEffect(() => () => { mounted.current = false }, [])
 
     const fetchOrCreate = useCallback(
-        async (uid: string, mail: string | null) => {
+        async (uid: string, mail: string | null, opts?: { background?: boolean }) => {
             if (!uid) return
+            if (opts?.background) setSyncing(true)
             setError(null)
             try {
                 // 1) Intentar leer perfil (respeta RLS)
@@ -75,7 +72,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                     supabase.from('profiles').select('*').eq('id', uid).maybeSingle(),
                     3500,
                 )
-
                 if (sel.data) {
                     if (!mounted.current) return
                     setProfile(sel.data as Profile)
@@ -89,7 +85,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 )
                 if ('error' in ensured && ensured.error) throw ensured.error
 
-                // 3) Releer para forma completa (si RLS ya lo permite)
+                // 3) Releer para forma completa
                 const again = await runWithTimeout(
                     supabase.from('profiles').select('*').eq('id', uid).maybeSingle(),
                     3500,
@@ -98,8 +94,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 setProfile((again.data as Profile) ?? (ensured.data as Profile) ?? null)
             } catch (err: unknown) {
                 if (!mounted.current) return
-                const msg =
-                    err instanceof Error ? err.message : typeof err === 'string' ? err : 'Error'
+                const msg = err instanceof Error ? err.message : String(err ?? 'Error')
                 if (msg === 'Failed to fetch' || !navigator.onLine) {
                     setError('Sin conexión. Intenta nuevamente.')
                 } else if (msg === 'TIMEOUT') {
@@ -108,6 +103,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                     setError(msg || 'Error de autenticación')
                 }
                 setProfile(null)
+            } finally {
+                if (opts?.background && mounted.current) setSyncing(false)
             }
         },
         [],
@@ -116,17 +113,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const refreshProfile = useCallback(async () => {
         if (!userId) return
         try {
+            setSyncing(true)
             const sess = await runWithTimeout(supabase.auth.getSession(), 4000)
-            await fetchOrCreate(userId, sess.data.session?.user?.email ?? null)
+            await fetchOrCreate(userId, sess.data.session?.user?.email ?? null, { background: true })
         } catch (err: unknown) {
             if (!mounted.current) return
-            const msg =
-                err instanceof Error ? err.message : typeof err === 'string' ? err : 'Error'
+            const msg = err instanceof Error ? err.message : String(err ?? 'Error')
             setError(msg || 'No se pudo actualizar el perfil')
+        } finally {
+            if (mounted.current) setSyncing(false)
         }
     }, [userId, fetchOrCreate])
 
-    // ❶ Init + listener de cambios de sesión
+    // ❶ Arranque inicial: único momento donde “loading=true”
     useEffect(() => {
         const init = async () => {
             setLoading(true)
@@ -139,75 +138,59 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 setUserId(uid)
                 setEmail(mail)
                 if (uid) {
-                    await fetchOrCreate(uid, mail)
+                    await fetchOrCreate(uid, mail) // ⚠️ sin background: es el arranque
                 }
             } catch (err: unknown) {
                 if (!mounted.current) return
-                const msg =
-                    err instanceof Error ? err.message : typeof err === 'string' ? err : 'Error'
+                const msg = err instanceof Error ? err.message : String(err ?? 'Error')
                 setError(
                     msg === 'TIMEOUT'
                         ? 'La sesión tardó demasiado. Reintenta.'
                         : msg || 'Error inicializando sesión',
                 )
             } finally {
-                if (mounted.current) setLoading(false)
+                if (mounted.current) setLoading(false) // ⬅️ nunca más volvemos a bloquear la UI
             }
         }
         void init()
 
-        const { data: sub } = supabase.auth.onAuthStateChange(async (_evt, sess) => {
+        // ❷ Cambios de sesión: NO bloqueamos la UI (solo syncing)
+        const { data: sub } = supabase.auth.onAuthStateChange(async (evt, sess) => {
             if (!mounted.current) return
-            setLoading(true)
             setError(null)
             try {
                 const uid = sess?.user?.id ?? null
                 const mail = sess?.user?.email ?? null
                 setUserId(uid)
                 setEmail(mail)
-                if (uid) {
-                    await fetchOrCreate(uid, mail)
-                } else {
+
+                if (evt === 'SIGNED_OUT' || !uid) {
                     setProfile(null)
+                    return
                 }
+                // Cualquier otro evento (TOKEN_REFRESHED, USER_UPDATED, SIGNED_IN)
+                await fetchOrCreate(uid, mail, { background: true })
             } catch (err: unknown) {
-                const msg =
-                    err instanceof Error ? err.message : typeof err === 'string' ? err : 'Error'
+                const msg = err instanceof Error ? err.message : String(err ?? 'Error')
                 if (mounted.current) setError(msg || 'No se pudo actualizar la sesión')
-            } finally {
-                if (mounted.current) setLoading(false)
             }
         })
-        return () => {
-            sub.subscription.unsubscribe()
-        }
+        return () => { sub.subscription.unsubscribe() }
     }, [fetchOrCreate])
 
-    // ❷ Heartbeat de sesión: ping periódico + al volver a primer plano
+    // ❸ Heartbeat de sesión (mantener viva sin parpadear la UI)
     useEffect(() => {
-        // Ping silencioso cada 15 minutos para mantener viva la sesión/refresh token
         const id = setInterval(() => {
-            supabase.auth.getSession().catch(() => {
-                /* no-op */
-            })
+            supabase.auth.getSession().catch(() => {})
         }, 15 * 60 * 1000)
-
-        // Refresca cuando la pestaña vuelve a ser visible
         const onVisible = () => {
             if (document.visibilityState === 'visible') {
-                supabase.auth.getSession().catch(() => {
-                    /* no-op */
-                })
+                supabase.auth.getSession().catch(() => {})
             }
         }
+        const onOnline = () => { if (userId) void refreshProfile() }
         document.addEventListener('visibilitychange', onVisible)
-
-        // Al volver a estar online, refrescar perfil si había usuario
-        const onOnline = () => {
-            if (userId) void refreshProfile()
-        }
         window.addEventListener('online', onOnline)
-
         return () => {
             clearInterval(id)
             document.removeEventListener('visibilitychange', onVisible)
@@ -226,7 +209,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     return (
         <Ctx.Provider
-            value={{ userId, email, profile, loading, error, refreshProfile, signOut }}
+            value={{ userId, email, profile, loading, syncing, error, refreshProfile, signOut }}
         >
             {children}
         </Ctx.Provider>
