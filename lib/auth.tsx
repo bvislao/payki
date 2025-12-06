@@ -199,12 +199,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }, [userId, refreshProfile])
 
     const signOut = async () => {
-        await supabase.auth.signOut()
-        if (!mounted.current) return
-        setUserId(null)
-        setEmail(null)
-        setProfile(null)
-        setError(null)
+        try {
+            // (Opcional) Limpia subs de push del usuario actual
+            if (userId) {
+                try { await supabase.from('push_subscriptions').delete().eq('user_id', userId) } catch {}
+            }
+
+            // Cierre de sesión global (revoca refresh token en el backend)
+            const { error } = await supabase.auth.signOut({ scope: 'global' })
+            if (error) throw error
+        } catch (e) {
+            // Si algo falla, igual limpia el estado local
+            console.warn('[signOut]', e)
+        } finally {
+            if (mounted.current) {
+                setUserId(null)
+                setEmail(null)
+                setProfile(null)
+                setError(null)
+            }
+            // Evita estados “pegados” por cache: limpia SW caches y redirige
+            if (typeof window !== 'undefined') {
+                try {
+                    // borra todos los caches del SW (no rompe tu app, solo fuerza revalidación)
+                    // @ts-ignore – navigator.caches no siempre tipeado
+                    caches?.keys?.().then((keys: string[]) => keys.forEach(k => caches.delete(k)))
+                } catch {}
+                window.location.replace('/login')
+            }
+        }
     }
 
     return (
