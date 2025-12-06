@@ -47,47 +47,39 @@ function runWithTimeout<T>(p: PromiseLike<T>, ms = 4000): Promise<T> {
     })
 }
 
-/* ------------------------- Cache de perfil (12h) ------------------------- */
+/* ---------- Caché de perfil (12 horas) ---------- */
 const CACHE_TTL_MS = 12 * 60 * 60 * 1000 // 12h
-const cacheKey = (uid: string) => `payki:profile:${uid}`
+const cacheKey   = (uid: string) => `payki:profile:${uid}`
 const cacheTsKey = (uid: string) => `payki:profile:${uid}:ts`
 
-function loadCachedProfile(uid: string) {
+function loadCachedProfile(uid: string): Profile | null {
     try {
+        if (typeof localStorage === 'undefined') return null
         const raw = localStorage.getItem(cacheKey(uid))
-        const ts = Number(localStorage.getItem(cacheTsKey(uid)) || 0)
+        const ts  = Number(localStorage.getItem(cacheTsKey(uid)) || 0)
         if (!raw || !Number.isFinite(ts)) return null
         if (Date.now() - ts > CACHE_TTL_MS) return null
-        return JSON.parse(raw)
+        return JSON.parse(raw) as Profile
     } catch { return null }
 }
 
-function saveCachedProfile(uid: string, p: unknown) {
+function saveCachedProfile(uid: string, p: Profile | null) {
     try {
+        if (typeof localStorage === 'undefined' || !p) return
         localStorage.setItem(cacheKey(uid), JSON.stringify(p))
         localStorage.setItem(cacheTsKey(uid), String(Date.now()))
     } catch {}
 }
 
-function isCacheFresh(uid: string) {
-    try {
-        const ts = Number(localStorage.getItem(cacheTsKey(uid)) || 0)
-        return Number.isFinite(ts) && (Date.now() - ts <= CACHE_TTL_MS)
-    } catch { return false }
-}
-/* ------------------------------------------------------------------------ */
+/* ------------------------------------------------ */
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-    const [userId, setUserId] = useState<string | null>(null)
-    const [email, setEmail] = useState<string | null>(null)
-    const [profile, setProfile] = useState<Profile | null>(null)
-
-    // “booting” (loading) solo en el arranque
-    const [loading, setLoading] = useState(true)
-    // “syncing” para background refresh sin bloquear UI
-    const [syncing, setSyncing] = useState(false)
-
-    const [error, setError] = useState<string | null>(null)
+    const [userId, setUserId]     = useState<string | null>(null)
+    const [email,  setEmail]      = useState<string | null>(null)
+    const [profile, setProfile]   = useState<Profile | null>(null)
+    const [loading, setLoading]   = useState(true)   // solo en el boot
+    const [syncing, setSyncing]   = useState(false)  // refrescos bg
+    const [error, setError]       = useState<string | null>(null)
     const mounted = useRef(true)
     useEffect(() => () => { mounted.current = false }, [])
 
@@ -97,17 +89,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             if (opts?.background) setSyncing(true)
             setError(null)
 
-            // A) Servir desde caché si está fresco (evita red y “refrescos”)
+            // Mostrar caché inmediatamente si existe (no bloquea UI)
             const cached = loadCachedProfile(uid)
-            if (cached && isCacheFresh(uid)) {
-                if (!mounted.current) return
-                setProfile(cached as Profile)
-                if (opts?.background) setSyncing(false)
-                return
-            }
+            if (cached && !opts?.background) setProfile(cached)
 
             try {
-                // B) Intentar leer perfil (respeta RLS)
+                // 1) Intentar leer perfil (respeta RLS)
                 const sel = await runWithTimeout(
                     supabase.from('profiles').select('*').eq('id', uid).maybeSingle(),
                     3500,
@@ -115,39 +102,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 if (sel.data) {
                     if (!mounted.current) return
                     setProfile(sel.data as Profile)
-                    saveCachedProfile(uid, sel.data)
+                    saveCachedProfile(uid, sel.data as Profile)
                     return
                 }
 
-                // C) Asegurar perfil por RPC (sin RLS)
-                const ensured = await runWithTimeout(
+                // 2) Asegurar perfil por RPC (sin RLS)
+                const ensuredResp = await runWithTimeout(
                     supabase.rpc('ensure_profile', { p_id: uid, p_email: mail ?? '' }),
-                    3500,
+                    3500
                 )
-                // @ts-expect-error tipos de supabase
-                if (ensured?.error) throw ensured.error
+                if (ensuredResp.error) throw ensuredResp.error
 
-                // D) Releer para forma completa y cachear
-                const again = await runWithTimeout(
+// 3) Releer para forma completa
+                const againResp = await runWithTimeout(
                     supabase.from('profiles').select('*').eq('id', uid).maybeSingle(),
-                    3500,
+                    3500
                 )
-                if (!mounted.current) return
-                const pf = (again.data as Profile) ?? (ensured.data as Profile) ?? null
-                setProfile(pf)
-                if (pf) saveCachedProfile(uid, pf)
 
+                if (!mounted.current) return
+                const finalProfile =
+                    (againResp.data as Profile) ?? (ensuredResp.data as Profile) ?? null
+
+                setProfile(finalProfile)
+                saveCachedProfile(uid, finalProfile)
             } catch (err: unknown) {
                 if (!mounted.current) return
                 const msg = err instanceof Error ? err.message : String(err ?? 'Error')
-
-                // Si hay caché previo, mantén la UI consistente en offline/timeout
-                const cachedFallback = loadCachedProfile(uid)
-                if (cachedFallback && (msg === 'Failed to fetch' || msg === 'TIMEOUT' || !navigator.onLine)) {
-                    setProfile(cachedFallback as Profile)
-                    return
-                }
-
                 if (msg === 'Failed to fetch' || !navigator.onLine) {
                     setError('Sin conexión. Intenta nuevamente.')
                 } else if (msg === 'TIMEOUT') {
@@ -155,7 +135,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 } else {
                     setError(msg || 'Error de autenticación')
                 }
-                setProfile(null)
+                // Si había caché, mantenla; si no, limpia.
+                if (!cached) setProfile(null)
             } finally {
                 if (opts?.background && mounted.current) setSyncing(false)
             }
@@ -178,32 +159,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
     }, [userId, fetchOrCreate])
 
-    // ❶ Arranque inicial: “loading=true” solo aquí
+    // ❶ Arranque: usa caché si existe y refresca en bg
     useEffect(() => {
         const init = async () => {
             setLoading(true)
             setError(null)
             try {
                 const sess = await runWithTimeout(supabase.auth.getSession(), 4000)
-                const uid = sess.data.session?.user?.id ?? null
+                const uid  = sess.data.session?.user?.id ?? null
                 const mail = sess.data.session?.user?.email ?? null
                 if (!mounted.current) return
-
                 setUserId(uid)
                 setEmail(mail)
 
                 if (uid) {
-                    // Monta al instante desde caché si existe
                     const cached = loadCachedProfile(uid)
-                    if (cached) {
-                        setProfile(cached as Profile)
-                        setLoading(false)
-                        // Si el caché no está fresco, refresca en background (sin bloquear UI)
-                        if (!isCacheFresh(uid)) void fetchOrCreate(uid, mail, { background: true })
-                        return
-                    }
-                    // Sin caché → petición normal (solo en arranque)
-                    await fetchOrCreate(uid, mail)
+                    if (cached) setProfile(cached)
+                    // refresca en segundo plano si había cache; si no, espera data real
+                    await fetchOrCreate(uid, mail, { background: !!cached })
                 }
             } catch (err: unknown) {
                 if (!mounted.current) return
@@ -214,48 +187,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                         : msg || 'Error inicializando sesión',
                 )
             } finally {
-                if (mounted.current) setLoading(false) // nunca más bloqueamos la UI
+                if (mounted.current) setLoading(false)
             }
         }
         void init()
 
-        // ❷ Cambios de sesión: NO bloqueamos la UI (solo syncing/background)
+        // ❷ Cambios de sesión: no bloquear UI (solo syncing)
         const { data: sub } = supabase.auth.onAuthStateChange(async (evt, sess) => {
             if (!mounted.current) return
             setError(null)
+            try {
+                const uid  = sess?.user?.id ?? null
+                const mail = sess?.user?.email ?? null
+                setUserId(uid)
+                setEmail(mail)
 
-            // Evita “parpadeos” por TOKEN_REFRESHED
-            if (evt === 'TOKEN_REFRESHED') return
-
-            const uid = sess?.user?.id ?? null
-            const mail = sess?.user?.email ?? null
-            setUserId(uid)
-            setEmail(mail)
-
-            if (!uid || evt === 'SIGNED_OUT') {
-                setProfile(null)
-                return
-            }
-
-            // Usa caché si existe; refresca en segundo plano si no está fresco
-            const cached = loadCachedProfile(uid)
-            if (cached) {
-                setProfile(cached as Profile)
-                if (!isCacheFresh(uid)) void fetchOrCreate(uid, mail, { background: true })
-            } else {
-                // Sin caché → refresh en background para no bloquear
-                void fetchOrCreate(uid, mail, { background: true })
+                if (evt === 'SIGNED_OUT' || !uid) {
+                    setProfile(null)
+                    return
+                }
+                await fetchOrCreate(uid, mail, { background: true })
+            } catch (err: unknown) {
+                const msg = err instanceof Error ? err.message : String(err ?? 'Error')
+                if (mounted.current) setError(msg || 'No se pudo actualizar la sesión')
             }
         })
-
         return () => { sub.subscription.unsubscribe() }
     }, [fetchOrCreate])
 
-    // ❸ Heartbeat de sesión (mantener viva sin parpadear la UI)
+    // ❸ Heartbeat de sesión
     useEffect(() => {
         const id = setInterval(() => {
             supabase.auth.getSession().catch(() => {})
-        }, 15 * 60 * 1000) // cada 15 min
+        }, 15 * 60 * 1000)
 
         const onVisible = () => {
             if (document.visibilityState === 'visible') {
@@ -266,7 +230,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         document.addEventListener('visibilitychange', onVisible)
         window.addEventListener('online', onOnline)
-
         return () => {
             clearInterval(id)
             document.removeEventListener('visibilitychange', onVisible)
@@ -280,7 +243,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             if (userId) {
                 try { await supabase.from('push_subscriptions').delete().eq('user_id', userId) } catch {}
             }
-            // Cierre de sesión global
+
+            // Cierre de sesión global (revoca refresh tokens)
             const { error } = await supabase.auth.signOut({ scope: 'global' })
             if (error) throw error
         } catch (e) {
@@ -292,10 +256,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 setProfile(null)
                 setError(null)
             }
-            // Evita estados “pegados”: limpia caches y redirige
+            // Forzar revalidación limpiando caches y redirigiendo
             if (typeof window !== 'undefined') {
                 try {
-                    // @ts-ignore – tipos de Cache API
+                    // @ts-ignore – navigator.caches puede no estar tipeado
                     caches?.keys?.().then((keys: string[]) => keys.forEach(k => caches.delete(k)))
                 } catch {}
                 window.location.replace('/login')
