@@ -59,8 +59,7 @@ export default function HeaderClient() {
                 {userId ? (
                     <button
                         className="btn-outline"
-                        onClick={async () => { await signOut(); window.location.href = '/' }}
-                        aria-label="Cerrar sesión"
+                        onClick={async () => { await signOut() }}
                     >
                         Cerrar sesión
                     </button>

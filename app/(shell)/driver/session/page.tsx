@@ -73,7 +73,7 @@ export default function DriverSession() {
         })()
     }, [userId])
 
-    // 2) Realtime: escuchar INSERT en transactions del conductor
+    // 2) Realtime: escuchar INSERT en transactions del conductor (con filtro por shift activo)
     useEffect(() => {
         if (!userId) return
         const channel = supabase
@@ -84,7 +84,7 @@ export default function DriverSession() {
                 (payload) => {
                     const row = payload.new as TxRow
                     if (row?.type !== 'ride') return
-                    // si hay turno, limitar al shift actual para evitar ruido
+                    // Si hay turno, limitar al shift actual para evitar ruido de otros turnos
                     if (shift && row?.meta?.shift_id && row.meta.shift_id !== shift.id) return
 
                     if (!seen.current.has(row.id)) {
@@ -100,8 +100,9 @@ export default function DriverSession() {
                 }
             )
             .subscribe()
+
         return () => { supabase.removeChannel(channel) }
-        // Dependemos de shift?.id para que, si cambia de turno, el filtro lógico se aplique
+        // Re-aplica la lógica si cambia el shift
     }, [userId, shift?.id, cashAudio])
 
     // 3) Cargar tarifas del operador del shift

@@ -22,9 +22,11 @@ export default function PushClient() {
     useEffect(() => {
         const s = detectPushSupport()
         setSupported(s.ok)
+
         if (typeof window !== 'undefined' && 'Notification' in window) {
             setPermission(Notification.permission)
         }
+
         ;(async () => {
             try {
                 if (!('serviceWorker' in navigator) || !('PushManager' in window)) return
@@ -50,11 +52,12 @@ export default function PushClient() {
         try {
             setBusy(true)
 
+            // Registrar SW una sola vez
             await registerSW()
 
-            // Solicita permiso si aún no se concedió
+            // Solicitar permiso si aún no se concedió
             if (typeof window !== 'undefined' && 'Notification' in window) {
-                let p = Notification.permission
+                let p: NotificationPermission = Notification.permission
                 if (p === 'default') {
                     p = await Notification.requestPermission()
                 }
@@ -65,15 +68,18 @@ export default function PushClient() {
                 }
             }
 
-            await registerSW()
-            await subscribePush(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!, async (p) => {
-                await supabase.from('push_subscriptions').upsert({
-                    user_id: userId,
-                    endpoint: p.endpoint,
-                    p256dh: p.p256dh,
-                    auth: p.auth,
-                    user_agent: navigator.userAgent,
-                }, { onConflict: 'endpoint' })
+            // Suscribirse y persistir la suscripción
+            await subscribePush(vapid, async ({ endpoint, p256dh, auth }) => {
+                await supabase.from('push_subscriptions').upsert(
+                    {
+                        user_id: userId,
+                        endpoint,
+                        p256dh,
+                        auth,
+                        user_agent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
+                    },
+                    { onConflict: 'endpoint' }
+                )
             })
 
             setSubscribed(true)
@@ -105,10 +111,15 @@ export default function PushClient() {
         }
     }
 
-    // Botón deshabilitado si no hay soporte
+    // Sin soporte → botón inactivo con icono
     if (!supported) {
         return (
-            <button className="btn-outline opacity-60 cursor-not-allowed" disabled title="Web Push no soportado en este navegador">
+            <button
+                className="btn-outline opacity-60 cursor-not-allowed"
+                disabled
+                title="Web Push no soportado en este navegador"
+                aria-label="Push no disponible"
+            >
                 <BellOff className="h-4 w-4 mr-2" />
                 Push no disponible
             </button>
